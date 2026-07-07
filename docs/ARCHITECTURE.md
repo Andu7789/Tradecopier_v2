@@ -37,6 +37,28 @@ when both EAs are running fine. Since master and slave always run on the
 same physical machine by design, `GetTickCount64()` is directly comparable
 between the two processes.
 
+## Slave status file (slave → dashboard)
+
+Filename: `TC_Slave_<MasterID>_<slaveLogin>.status` (Common folder). Written
+by `TC_Slave.mq5` on the same timer as its copy cycle, and *always* written
+even on cycles where no copying happened (no master data, stale master
+data, halted) so it acts as a heartbeat. This is what lets the web
+dashboard (`webapp/`) show every slave's live equity, halted state, and
+mirrored positions by reading only the Common folder — it never needs to
+know about each terminal's separate (per-install) local `Files` folder.
+
+```
+TCSTAT1|<login>|<localMs>|<balance>|<equity>|<peakEquity>|<halted 0/1>|<masterLinkMs>|<mappedCount>
+S|<masterTicket>|<slaveTicket>|<symbol>|<volume>|<sl>|<tp>
+S|...
+```
+
+`masterLinkMs` is how old the master snapshot was (in machine-clock ms) the
+last time this slave successfully read it, or `-1` if it has never seen a
+master snapshot at all. The dashboard itself determines file freshness
+from each file's own mtime rather than parsing `localMs`, so it works the
+same regardless of what host it's read from.
+
 ## Ticket map (per slave, local disk)
 
 Filename: `TC_Slave_<MasterID>_<slaveLogin>_map.dat`, in that terminal's

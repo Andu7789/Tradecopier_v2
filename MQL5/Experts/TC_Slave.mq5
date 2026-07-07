@@ -64,6 +64,7 @@ string      g_mapFileName;
 double      g_peakEquity;
 bool        g_halted = false;
 int         g_staleLogThrottle = 0;
+long        g_lastMasterAgeMs = -1; // -1 = master snapshot never seen at all
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -86,6 +87,8 @@ int OnInit()
    int interval = (PollIntervalMs < 50) ? 50 : PollIntervalMs;
    EventSetMillisecondTimer(interval);
 
+   PublishStatus();
+
    PrintFormat("TC_Slave: following MasterID='%s', %d existing mapped position(s) restored.", MasterID, ArraySize(g_map));
    return(INIT_SUCCEEDED);
 }
@@ -100,15 +103,27 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   RunCopyCycle();
+   PublishStatus(); // always publish, even on cycles that skipped copying, so the
+                     // dashboard sees a live heartbeat rather than a frozen file.
+}
+
+void RunCopyCycle()
+{
    CheckEquityProtection();
 
    STradeSnapshotHeader header;
    SPositionRecord masterPositions[];
 
    if(!TC_ReadSnapshot(MasterID, header, masterPositions))
+   {
+      g_lastMasterAgeMs = -1;
       return; // master not publishing yet (or wrong MasterID)
+   }
 
    long ageMs = (long)GetTickCount64() - header.localMs;
+   g_lastMasterAgeMs = ageMs;
+
    if(ageMs > (long)MaxStaleSeconds * 1000)
    {
       if(g_staleLogThrottle % 40 == 0)
@@ -151,6 +166,44 @@ void OnTimer()
    }
 
    SaveMap();
+}
+
+//+------------------------------------------------------------------+
+//| Publish this slave's live status to the shared Common folder, so |
+//| a monitoring tool can see it without touching this terminal's own|
+//| (per-install) Files folder.                                      |
+//+------------------------------------------------------------------+
+void PublishStatus()
+{
+   long login = (long)AccountInfoInteger(ACCOUNT_LOGIN);
+
+   string headerParts[9];
+   headerParts[0] = "TCSTAT1";
+   headerParts[1] = IntegerToString(login);
+   headerParts[2] = IntegerToString((long)GetTickCount64());
+   headerParts[3] = DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2);
+   headerParts[4] = DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2);
+   headerParts[5] = DoubleToString(g_peakEquity, 2);
+   headerParts[6] = g_halted ? "1" : "0";
+   headerParts[7] = IntegerToString(g_lastMasterAgeMs);
+   headerParts[8] = IntegerToString(ArraySize(g_map));
+
+   string content = TC_Join(headerParts) + "\r\n";
+
+   for(int i = 0; i < ArraySize(g_map); i++)
+   {
+      string parts[7];
+      parts[0] = "S";
+      parts[1] = IntegerToString((long)g_map[i].masterTicket);
+      parts[2] = IntegerToString((long)g_map[i].slaveTicket);
+      parts[3] = g_map[i].slaveSymbol;
+      parts[4] = DoubleToString(g_map[i].lastMasterVolume, 2);
+      parts[5] = DoubleToString(g_map[i].lastSl, 8);
+      parts[6] = DoubleToString(g_map[i].lastTp, 8);
+      content += TC_Join(parts) + "\r\n";
+   }
+
+   TC_WriteTextAtomic(TC_SlaveStatusFileName(MasterID, login), TC_SlaveStatusTempFileName(MasterID, login), content);
 }
 
 //+------------------------------------------------------------------+

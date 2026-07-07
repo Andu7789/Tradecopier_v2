@@ -43,6 +43,28 @@ snapshot file on disk that every MT5 terminal on the machine can see.
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the on-disk file
 formats and the full diff algorithm.
 
+## Web dashboard (`webapp/`)
+
+A small local, read-only dashboard for watching the copier: master
+account(s), every slave's live equity/halted state, and each slave's
+currently mirrored positions. It just reads the same Common-folder files
+the EAs already publish — it doesn't change any settings (those are still
+configured via each EA's MT5 input parameters) and it's bound to
+`127.0.0.1` only, not exposed on the network.
+
+```
+cd webapp
+pip install -r requirements.txt
+python app.py
+```
+
+Then open `http://127.0.0.1:8787`. If MT5's Common folder isn't at the
+default Windows location, point the app at it first:
+
+```
+TC_COMMON_FOLDER="C:\Users\you\AppData\Roaming\MetaQuotes\Terminal\Common\Files" python app.py
+```
+
 ## Setup
 
 1. Install a separate MT5 terminal for the master account and one more per

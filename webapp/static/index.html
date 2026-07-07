@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tradecopier Dashboard</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f6f8;
+    --card-bg: #ffffff;
+    --border: #e2e4e9;
+    --text: #1c1f26;
+    --muted: #6b7280;
+    --green: #1a8754;
+    --red: #d92d20;
+    --amber: #b45309;
+    --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161b;
+      --card-bg: #1c1f26;
+      --border: #2c303a;
+      --text: #e7e9ee;
+      --muted: #9aa1ae;
+      --green: #3ecf8e;
+      --red: #f66;
+      --amber: #f0b429;
+      --accent: #5b8def;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 20px 24px 12px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  h1 { font-size: 18px; margin: 0; }
+  .meta { color: var(--muted); font-size: 12px; }
+  main { padding: 0 24px 40px; max-width: 1200px; margin: 0 auto; }
+  section { margin-top: 24px; }
+  section h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+  .card-title { font-weight: 600; font-size: 15px; }
+  .card-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot.fresh { background: var(--green); }
+  .dot.stale { background: var(--red); }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+  }
+  .badge.ok { color: var(--green); border-color: var(--green); }
+  .badge.halted { color: var(--red); border-color: var(--red); background: rgba(217,45,32,0.08); }
+  .stats { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0 12px; }
+  .stat-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat-value { font-size: 15px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; }
+  .side-buy { color: var(--green); font-weight: 600; }
+  .side-sell { color: var(--red); font-weight: 600; }
+  .empty { color: var(--muted); font-style: italic; padding: 10px 0; }
+  .warn-banner {
+    border: 1px solid var(--amber);
+    color: var(--amber);
+    background: rgba(180,83,9,0.08);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-top: 16px;
+  }
+  code { background: var(--border); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tradecopier Dashboard</h1>
+  <div class="meta" id="meta">loading…</div>
+</header>
+<main>
+  <div id="warning"></div>
+
+  <section>
+    <h2>Master account(s)</h2>
+    <div class="grid" id="masters"></div>
+  </section>
+
+  <section>
+    <h2>Slave (destination) accounts</h2>
+    <div class="grid" id="slaves"></div>
+  </section>
+</main>
+
+<script>
+const FRESH_LIMIT_SECONDS = 5;
+
+function fmtMoney(n) {
+  return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function freshDot(ageSeconds) {
+  const fresh = ageSeconds <= FRESH_LIMIT_SECONDS;
+  return `<span class="dot ${fresh ? 'fresh' : 'stale'}"></span>${fresh ? 'live' : ageSeconds.toFixed(1) + 's ago'}`;
+}
+
+function masterCard(m) {
+  const rows = m.positions.map(p => `
+    <tr>
+      <td>#${p.ticket}</td>
+      <td>${p.symbol}</td>
+      <td class="side-${p.type.toLowerCase()}">${p.type}</td>
+      <td>${p.volume.toFixed(2)}</td>
+      <td>${p.priceOpen}</td>
+      <td>${p.sl || '—'}</td>
+      <td>${p.tp || '—'}</td>
+    </tr>`).join('');
+
+  return `
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <div class="card-title">Master ${m.masterId}</div>
+        <div class="card-sub">login #${m.login}</div>
+      </div>
+      <div class="card-sub">${freshDot(m.ageSeconds)}</div>
+    </div>
+    <div class="stats">
+      <div><div class="stat-label">Balance</div><div class="stat-value">${fmtMoney(m.balance)}</div></div>
+      <div><div class="stat-label">Equity</div><div class="stat-value">${fmtMoney(m.equity)}</div></div>
+      <div><div class="stat-label">Open positions</div><div class="stat-value">${m.posCount}</div></div>
+    </div>
+    ${m.positions.length ? `
+    <table>
+      <thead><tr><th>Ticket</th><th>Symbol</th><th>Side</th><th>Vol</th><th>Open</th><th>SL</th><th>TP</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>` : '<div class="empty">No open positions</div>'}
+  </div>`;
+}
+
+function slaveCard(s) {
+  const rows = s.mapped.map(p => `
+    <tr>
+      <td>#${p.masterTicket} → #${p.slaveTicket}</td>
+      <td>${p.symbol}</td>
+      <td>${p.volume.toFixed(2)}</td>
+      <td>${p.sl || '—'}</td>
+      <td>${p.tp || '—'}</td>
+    </tr>`).join('');
+
+  const linkInfo = s.masterLinkMs === null
+    ? `<span class="dot stale"></span>no master data seen`
+    : (s.masterLinkMs <= 5000
+        ? `<span class="dot fresh"></span>linked (${s.masterLinkMs}ms)`
+        : `<span class="dot stale"></span>master data ${(s.masterLinkMs/1000).toFixed(1)}s old`);
+
+  return `
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <div class="card-title">Slave — following ${s.masterId}</div>
+        <div class="card-sub">login #${s.login}</div>
+      </div>
+      <div>
+        ${s.halted ? '<span class="badge halted">HALTED</span>' : '<span class="badge ok">ACTIVE</span>'}
+      </div>
+    </div>
+    <div class="card-sub">${freshDot(s.ageSeconds)} &middot; ${linkInfo}</div>
+    <div class="stats">
+      <div><div class="stat-label">Balance</div><div class="stat-value">${fmtMoney(s.balance)}</div></div>
+      <div><div class="stat-label">Equity</div><div class="stat-value">${fmtMoney(s.equity)}</div></div>
+      <div><div class="stat-label">Peak equity</div><div class="stat-value">${fmtMoney(s.peakEquity)}</div></div>
+      <div><div class="stat-label">Mapped</div><div class="stat-value">${s.mappedCount}</div></div>
+    </div>
+    ${s.mapped.length ? `
+    <table>
+      <thead><tr><th>Ticket (master → slave)</th><th>Symbol</th><th>Vol</th><th>SL</th><th>TP</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>` : '<div class="empty">No mirrored positions</div>'}
+  </div>`;
+}
+
+async function refresh() {
+  let data;
+  try {
+    const res = await fetch('/api/status');
+    data = await res.json();
+  } catch (e) {
+    document.getElementById('meta').textContent = 'Could not reach dashboard server';
+    return;
+  }
+
+  document.getElementById('meta').textContent =
+    `Common folder: ${data.commonFolder}  ·  refreshed ${new Date(data.serverTime * 1000).toLocaleTimeString()}`;
+
+  const warnEl = document.getElementById('warning');
+  if (!data.commonFolderExists) {
+    warnEl.innerHTML = `<div class="warn-banner">Common folder not found at <code>${data.commonFolder}</code>. Set the <code>TC_COMMON_FOLDER</code> environment variable to the correct path and restart the dashboard.</div>`;
+  } else if (data.masters.length === 0 && data.slaves.length === 0) {
+    warnEl.innerHTML = `<div class="warn-banner">No TC_Master or TC_Slave snapshot files found yet in <code>${data.commonFolder}</code>. Make sure the EAs are attached to a chart with Algo Trading enabled.</div>`;
+  } else {
+    warnEl.innerHTML = '';
+  }
+
+  document.getElementById('masters').innerHTML =
+    data.masters.length ? data.masters.map(masterCard).join('') : '<div class="empty">No master accounts detected</div>';
+
+  document.getElementById('slaves').innerHTML =
+    data.slaves.length ? data.slaves.map(slaveCard).join('') : '<div class="empty">No slave accounts detected</div>';
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

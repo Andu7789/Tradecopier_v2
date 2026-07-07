@@ -75,22 +75,53 @@ string TC_SnapshotTempFileName(const string masterId)
 }
 
 //+------------------------------------------------------------------+
-//| Write the master's current state to the shared Common folder.    |
-//| Writes to a temp file then renames over the real file so a slave |
-//| never reads a half-written snapshot.                             |
+//| Slave status file naming. Published by TC_Slave alongside the    |
+//| master's snapshot (same Common folder) so a monitoring tool only |
+//| ever needs to watch one folder to see everything: master state   |
+//| and every slave's live equity/halted/mapped-position state.      |
 //+------------------------------------------------------------------+
-bool TC_WriteSnapshotAtomic(const string masterId, const STradeSnapshotHeader &header, const SPositionRecord &positions[])
+string TC_SlaveStatusFileName(const string masterId, const long slaveLogin)
 {
-   string tmpName = TC_SnapshotTempFileName(masterId);
-   string finalName = TC_SnapshotFileName(masterId);
+   return "TC_Slave_" + masterId + "_" + IntegerToString(slaveLogin) + ".status";
+}
 
+string TC_SlaveStatusTempFileName(const string masterId, const long slaveLogin)
+{
+   return "TC_Slave_" + masterId + "_" + IntegerToString(slaveLogin) + ".tmp";
+}
+
+//+------------------------------------------------------------------+
+//| Write text to a Common-folder file via write-temp-then-rename, so|
+//| a reader never observes a half-written file.                     |
+//+------------------------------------------------------------------+
+bool TC_WriteTextAtomic(const string finalName, const string tmpName, const string content)
+{
    int handle = FileOpen(tmpName, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
    if(handle == INVALID_HANDLE)
    {
-      PrintFormat("TC_Common: failed to open temp snapshot file '%s', error %d", tmpName, GetLastError());
+      PrintFormat("TC_Common: failed to open temp file '%s', error %d", tmpName, GetLastError());
       return false;
    }
 
+   FileWriteString(handle, content);
+   FileClose(handle);
+
+   // best-effort atomic rename: MQL5 has no true atomic rename, but this keeps the
+   // window where a reader could see a partial file to essentially zero, since the
+   // temp file above is fully flushed and closed before this replaces the live file.
+   if(!FileMove(tmpName, FILE_COMMON, finalName, FILE_COMMON | FILE_REWRITE))
+   {
+      PrintFormat("TC_Common: failed to publish '%s', error %d", finalName, GetLastError());
+      return false;
+   }
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Write the master's current state to the shared Common folder.    |
+//+------------------------------------------------------------------+
+bool TC_WriteSnapshotAtomic(const string masterId, const STradeSnapshotHeader &header, const SPositionRecord &positions[])
+{
    string headerParts[7];
    headerParts[0] = TC_FILE_VERSION;
    headerParts[1] = IntegerToString(header.login);
@@ -99,7 +130,8 @@ bool TC_WriteSnapshotAtomic(const string masterId, const STradeSnapshotHeader &h
    headerParts[4] = DoubleToString(header.balance, 2);
    headerParts[5] = DoubleToString(header.equity, 2);
    headerParts[6] = IntegerToString(header.posCount);
-   FileWriteString(handle, TC_Join(headerParts) + "\r\n");
+
+   string content = TC_Join(headerParts) + "\r\n";
 
    for(int i = 0; i < ArraySize(positions); i++)
    {
@@ -114,20 +146,10 @@ bool TC_WriteSnapshotAtomic(const string masterId, const STradeSnapshotHeader &h
       parts[7] = DoubleToString(positions[i].tp, 8);
       parts[8] = IntegerToString(positions[i].magic);
       parts[9] = IntegerToString((long)positions[i].timeOpen);
-      FileWriteString(handle, TC_Join(parts) + "\r\n");
+      content += TC_Join(parts) + "\r\n";
    }
 
-   FileClose(handle);
-
-   // best-effort atomic rename: MQL5 has no true atomic rename, but this keeps the
-   // window where a reader could see a partial file to essentially zero, since the
-   // temp file above is fully flushed and closed before this replaces the live file.
-   if(!FileMove(tmpName, FILE_COMMON, finalName, FILE_COMMON | FILE_REWRITE))
-   {
-      PrintFormat("TC_Common: failed to publish snapshot '%s', error %d", finalName, GetLastError());
-      return false;
-   }
-   return true;
+   return TC_WriteTextAtomic(TC_SnapshotFileName(masterId), TC_SnapshotTempFileName(masterId), content);
 }
 
 //+------------------------------------------------------------------+

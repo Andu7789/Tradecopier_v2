@@ -3,3 +3,9 @@
 *.ex5
 *.ex4
 *.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
