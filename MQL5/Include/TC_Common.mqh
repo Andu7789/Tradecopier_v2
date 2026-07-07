@@ -40,6 +40,7 @@ struct SPositionRecord
    double   tp;
    long     magic;
    datetime timeOpen;
+   double   profit;    // current floating P/L, informational only (not used by the diff algorithm)
 };
 
 //+------------------------------------------------------------------+
@@ -135,7 +136,7 @@ bool TC_WriteSnapshotAtomic(const string masterId, const STradeSnapshotHeader &h
 
    for(int i = 0; i < ArraySize(positions); i++)
    {
-      string parts[10];
+      string parts[11];
       parts[0] = "P";
       parts[1] = IntegerToString((long)positions[i].ticket);
       parts[2] = positions[i].symbol;
@@ -146,6 +147,7 @@ bool TC_WriteSnapshotAtomic(const string masterId, const STradeSnapshotHeader &h
       parts[7] = DoubleToString(positions[i].tp, 8);
       parts[8] = IntegerToString(positions[i].magic);
       parts[9] = IntegerToString((long)positions[i].timeOpen);
+      parts[10] = DoubleToString(positions[i].profit, 2);
       content += TC_Join(parts) + "\r\n";
    }
 
@@ -197,7 +199,7 @@ bool TC_ReadSnapshot(const string masterId, STradeSnapshotHeader &header, SPosit
          continue;
       }
 
-      if(n < 10 || parts[0] != "P")
+      if(n < 11 || parts[0] != "P")
          continue;
 
       SPositionRecord rec;
@@ -210,6 +212,7 @@ bool TC_ReadSnapshot(const string masterId, STradeSnapshotHeader &header, SPosit
       rec.tp        = StringToDouble(parts[7]);
       rec.magic     = (long)StringToInteger(parts[8]);
       rec.timeOpen  = (datetime)StringToInteger(parts[9]);
+      rec.profit    = StringToDouble(parts[10]);
 
       int idx = ArraySize(positions);
       ArrayResize(positions, idx + 1);

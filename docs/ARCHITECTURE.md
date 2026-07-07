@@ -24,9 +24,12 @@ zero for a file this small).
 
 ```
 TC2|<login>|<serverTime>|<localMs>|<balance>|<equity>|<posCount>
-P|<ticket>|<symbol>|<type 0=buy/1=sell>|<volume>|<priceOpen>|<sl>|<tp>|<magic>|<openTime>
+P|<ticket>|<symbol>|<type 0=buy/1=sell>|<volume>|<priceOpen>|<sl>|<tp>|<magic>|<openTime>|<profit>
 P|...
 ```
+
+`profit` is the position's current floating P/L (`POSITION_PROFIT`), included for
+display purposes only — it's not read by the slave's diff algorithm.
 
 `localMs` is `GetTickCount64()` — milliseconds since the *machine* booted,
 not broker server time. It's the field slaves use for staleness checks.
@@ -49,9 +52,12 @@ know about each terminal's separate (per-install) local `Files` folder.
 
 ```
 TCSTAT1|<login>|<localMs>|<balance>|<equity>|<peakEquity>|<halted 0/1>|<masterLinkMs>|<mappedCount>
-S|<masterTicket>|<slaveTicket>|<symbol>|<volume>|<sl>|<tp>
+S|<masterTicket>|<slaveTicket>|<symbol>|<volume>|<sl>|<tp>|<profit>
 S|...
 ```
+
+`profit` is the slave position's current floating P/L, looked up fresh each
+publish cycle — same display-only role as the master snapshot's `profit` field.
 
 `masterLinkMs` is how old the master snapshot was (in machine-clock ms) the
 last time this slave successfully read it, or `-1` if it has never seen a

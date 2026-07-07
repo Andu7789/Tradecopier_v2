@@ -192,7 +192,11 @@ void PublishStatus()
 
    for(int i = 0; i < ArraySize(g_map); i++)
    {
-      string parts[7];
+      double profit = 0;
+      if(PositionSelectByTicket(g_map[i].slaveTicket))
+         profit = PositionGetDouble(POSITION_PROFIT);
+
+      string parts[8];
       parts[0] = "S";
       parts[1] = IntegerToString((long)g_map[i].masterTicket);
       parts[2] = IntegerToString((long)g_map[i].slaveTicket);
@@ -200,6 +204,7 @@ void PublishStatus()
       parts[4] = DoubleToString(g_map[i].lastMasterVolume, 2);
       parts[5] = DoubleToString(g_map[i].lastSl, 8);
       parts[6] = DoubleToString(g_map[i].lastTp, 8);
+      parts[7] = DoubleToString(profit, 2);
       content += TC_Join(parts) + "\r\n";
    }
 

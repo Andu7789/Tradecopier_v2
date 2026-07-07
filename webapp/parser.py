@@ -24,7 +24,7 @@ def parse_master_snapshot(path: Path) -> Optional[dict]:
     positions = []
     for line in lines[1:]:
         f = line.split("|")
-        if len(f) < 10 or f[0] != "P":
+        if len(f) < 11 or f[0] != "P":
             continue
         positions.append({
             "ticket": f[1],
@@ -36,6 +36,7 @@ def parse_master_snapshot(path: Path) -> Optional[dict]:
             "tp": float(f[7]),
             "magic": f[8],
             "openTime": int(f[9]),
+            "profit": float(f[10]),
         })
 
     return {
@@ -60,7 +61,7 @@ def parse_slave_status(path: Path) -> Optional[dict]:
     mapped = []
     for line in lines[1:]:
         f = line.split("|")
-        if len(f) < 7 or f[0] != "S":
+        if len(f) < 8 or f[0] != "S":
             continue
         mapped.append({
             "masterTicket": f[1],
@@ -69,6 +70,7 @@ def parse_slave_status(path: Path) -> Optional[dict]:
             "volume": float(f[4]),
             "sl": float(f[5]),
             "tp": float(f[6]),
+            "profit": float(f[7]),
         })
 
     master_link_ms = int(header[7])

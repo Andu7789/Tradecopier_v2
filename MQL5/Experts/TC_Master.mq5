@@ -83,6 +83,7 @@ void PublishSnapshot()
       rec.tp        = PositionGetDouble(POSITION_TP);
       rec.magic     = magic;
       rec.timeOpen  = (datetime)PositionGetInteger(POSITION_TIME);
+      rec.profit    = PositionGetDouble(POSITION_PROFIT);
 
       int idx = ArraySize(positions);
       ArrayResize(positions, idx + 1);

@@ -56,7 +56,7 @@
     color: var(--muted);
     margin: 0 0 10px;
   }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 14px; }
   .card {
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -82,11 +82,15 @@
   .stats { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0 12px; }
   .stat-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
   .stat-value { font-size: 15px; font-weight: 600; }
+  .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th { color: var(--muted); font-weight: 500; }
   .side-buy { color: var(--green); font-weight: 600; }
   .side-sell { color: var(--red); font-weight: 600; }
+  .pl-pos { color: var(--green); font-weight: 600; }
+  .pl-neg { color: var(--red); font-weight: 600; }
+  .pl-flat { color: var(--muted); }
   .empty { color: var(--muted); font-style: italic; padding: 10px 0; }
   .warn-banner {
     border: 1px solid var(--amber);
@@ -131,6 +135,12 @@ function freshDot(ageSeconds) {
   return `<span class="dot ${fresh ? 'fresh' : 'stale'}"></span>${fresh ? 'live' : ageSeconds.toFixed(1) + 's ago'}`;
 }
 
+function fmtPl(n) {
+  const cls = n > 0 ? 'pl-pos' : (n < 0 ? 'pl-neg' : 'pl-flat');
+  const sign = n > 0 ? '+' : '';
+  return `<span class="${cls}">${sign}${fmtMoney(n)}</span>`;
+}
+
 function masterCard(m) {
   const rows = m.positions.map(p => `
     <tr>
@@ -141,6 +151,7 @@ function masterCard(m) {
       <td>${p.priceOpen}</td>
       <td>${p.sl || '—'}</td>
       <td>${p.tp || '—'}</td>
+      <td>${fmtPl(p.profit)}</td>
     </tr>`).join('');
 
   return `
@@ -158,10 +169,12 @@ function masterCard(m) {
       <div><div class="stat-label">Open positions</div><div class="stat-value">${m.posCount}</div></div>
     </div>
     ${m.positions.length ? `
+    <div class="table-wrap">
     <table>
-      <thead><tr><th>Ticket</th><th>Symbol</th><th>Side</th><th>Vol</th><th>Open</th><th>SL</th><th>TP</th></tr></thead>
+      <thead><tr><th>Ticket</th><th>Symbol</th><th>Side</th><th>Vol</th><th>Open</th><th>SL</th><th>TP</th><th>P/L</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>` : '<div class="empty">No open positions</div>'}
+    </table>
+    </div>` : '<div class="empty">No open positions</div>'}
   </div>`;
 }
 
@@ -173,6 +186,7 @@ function slaveCard(s) {
       <td>${p.volume.toFixed(2)}</td>
       <td>${p.sl || '—'}</td>
       <td>${p.tp || '—'}</td>
+      <td>${fmtPl(p.profit)}</td>
     </tr>`).join('');
 
   const linkInfo = s.masterLinkMs === null
@@ -200,10 +214,12 @@ function slaveCard(s) {
       <div><div class="stat-label">Mapped</div><div class="stat-value">${s.mappedCount}</div></div>
     </div>
     ${s.mapped.length ? `
+    <div class="table-wrap">
     <table>
-      <thead><tr><th>Ticket (master → slave)</th><th>Symbol</th><th>Vol</th><th>SL</th><th>TP</th></tr></thead>
+      <thead><tr><th>Ticket (master → slave)</th><th>Symbol</th><th>Vol</th><th>SL</th><th>TP</th><th>P/L</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>` : '<div class="empty">No mirrored positions</div>'}
+    </table>
+    </div>` : '<div class="empty">No mirrored positions</div>'}
   </div>`;
 }
 
