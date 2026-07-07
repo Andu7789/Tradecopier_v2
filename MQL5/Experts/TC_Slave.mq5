@@ -1,0 +1,450 @@
+//+------------------------------------------------------------------+
+//|                                                     TC_Slave.mq5 |
+//|  Trade Copier - Slave (destination) EA.                          |
+//|                                                                   |
+//|  Attach to a chart on a destination account, in its own separate |
+//|  terminal install. On a timer it reads the master's snapshot     |
+//|  file from the shared MT5 "Common" data folder and diffs it      |
+//|  against the ticket map it saved last cycle to decide what to    |
+//|  open, partially close, modify (SL/TP), or close on this         |
+//|  account. Run one instance of this EA (one terminal install) per |
+//|  destination account; all of them read the same master snapshot. |
+//|                                                                   |
+//|  Pending orders are intentionally not copied - positions only.   |
+//+------------------------------------------------------------------+
+#property copyright "Tradecopier_v2"
+#property version   "1.00"
+#property strict
+
+#include <TC_Common.mqh>
+#include <Trade\Trade.mqh>
+
+enum ENUM_TC_LOT_MODE
+{
+   LOT_FIXED,          // Fixed lot size for every copied trade
+   LOT_MULTIPLIER,     // masterVolume * LotMultiplier
+   LOT_BALANCE_RATIO,  // masterVolume * (slaveBalance / masterBalance) * LotMultiplier
+   LOT_EQUITY_RATIO    // masterVolume * (slaveEquity / masterEquity) * LotMultiplier
+};
+
+input string          MasterID              = "";     // Must match the MasterID set on TC_Master
+input int              PollIntervalMs        = 250;    // How often to check the master snapshot (ms)
+input int              MaxStaleSeconds       = 5;       // Ignore snapshots older than this (machine clock) - protects against a frozen/crashed master
+
+input long             MagicFilterMaster     = 0;       // Only copy master positions with this magic (0 = copy all)
+input string           SymbolBlacklist       = "";      // CSV of master symbol names to never copy, e.g. "US30,XAUUSD"
+input string           SymbolMap             = "";      // CSV "MASTERSYM:SLAVESYM,MASTERSYM2:SLAVESYM2" for broker symbol name differences
+input string           SlaveSymbolSuffix     = "";      // Appended to the mapped symbol if not already present, e.g. ".a"
+input bool             ReverseTrade          = false;   // Mirror buys as sells and vice versa
+
+input ENUM_TC_LOT_MODE LotMode               = LOT_MULTIPLIER;
+input double           FixedLot              = 0.01;    // Used when LotMode = LOT_FIXED
+input double           LotMultiplier         = 1.0;     // Used by LOT_MULTIPLIER / LOT_BALANCE_RATIO / LOT_EQUITY_RATIO
+
+input long             SlaveMagic            = 990001;  // Magic tag applied to every trade this EA opens. Used to identify "our" trades for closes/protection sweeps.
+input int              MaxSlippagePoints     = 30;
+
+input double           EquityFloor           = 0;       // Halt new copying if account equity drops to/below this (0 = disabled)
+input double           MaxDrawdownPercent    = 0;        // Halt new copying if equity drawdown from this EA's peak equity reaches this % (0 = disabled)
+input bool             CloseAllOnEquityBreach = false;   // If true, force-close every position tagged with SlaveMagic when the equity protection triggers
+
+struct SMapEntry
+{
+   ulong  masterTicket;
+   ulong  slaveTicket;
+   string slaveSymbol;
+   double lastMasterVolume;
+   double lastSl;
+   double lastTp;
+};
+
+CTrade      g_trade;
+SMapEntry   g_map[];
+string      g_mapFileName;
+double      g_peakEquity;
+bool        g_halted = false;
+int         g_staleLogThrottle = 0;
+
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   if(StringLen(MasterID) == 0)
+   {
+      Print("TC_Slave: MasterID input must be set to match the TC_Master's MasterID. EA will not run.");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+
+   g_trade.SetExpertMagicNumber(SlaveMagic);
+   g_trade.SetDeviationInPoints(MaxSlippagePoints);
+
+   g_mapFileName = "TC_Slave_" + MasterID + "_" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + "_map.dat";
+   LoadMap();
+
+   g_peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+   g_halted = false;
+
+   int interval = (PollIntervalMs < 50) ? 50 : PollIntervalMs;
+   EventSetMillisecondTimer(interval);
+
+   PrintFormat("TC_Slave: following MasterID='%s', %d existing mapped position(s) restored.", MasterID, ArraySize(g_map));
+   return(INIT_SUCCEEDED);
+}
+
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   EventKillTimer();
+   SaveMap();
+}
+
+//+------------------------------------------------------------------+
+void OnTimer()
+{
+   CheckEquityProtection();
+
+   STradeSnapshotHeader header;
+   SPositionRecord masterPositions[];
+
+   if(!TC_ReadSnapshot(MasterID, header, masterPositions))
+      return; // master not publishing yet (or wrong MasterID)
+
+   long ageMs = (long)GetTickCount64() - header.localMs;
+   if(ageMs > (long)MaxStaleSeconds * 1000)
+   {
+      if(g_staleLogThrottle % 40 == 0)
+         PrintFormat("TC_Slave: master snapshot is stale (%dms old, limit %dms) - skipping this cycle.", ageMs, MaxStaleSeconds * 1000);
+      g_staleLogThrottle++;
+      return;
+   }
+   g_staleLogThrottle = 0;
+
+   // --- opens / modifies / partial closes -----------------------------------
+   for(int i = 0; i < ArraySize(masterPositions); i++)
+   {
+      SPositionRecord mp = masterPositions[i];
+
+      if(MagicFilterMaster != 0 && mp.magic != MagicFilterMaster)
+         continue;
+      if(TC_ListContains(SymbolBlacklist, mp.symbol))
+         continue;
+
+      int idx = FindMapIndexByMasterTicket(mp.ticket);
+      if(idx < 0)
+      {
+         if(!g_halted)
+            OpenNewSlavePosition(mp, header);
+      }
+      else
+      {
+         UpdateExistingSlavePosition(mp, idx);
+      }
+   }
+
+   // --- closes: anything mapped whose master ticket disappeared -------------
+   for(int j = ArraySize(g_map) - 1; j >= 0; j--)
+   {
+      if(!IsMasterTicketPresent(masterPositions, g_map[j].masterTicket))
+      {
+         CloseSlavePosition(g_map[j]);
+         ArrayRemove(g_map, j, 1);
+      }
+   }
+
+   SaveMap();
+}
+
+//+------------------------------------------------------------------+
+//| Lot sizing                                                        |
+//+------------------------------------------------------------------+
+double ComputeLotSize(double masterVolume, double masterBalance, double masterEquity)
+{
+   switch(LotMode)
+   {
+      case LOT_FIXED:
+         return FixedLot;
+
+      case LOT_BALANCE_RATIO:
+         if(masterBalance <= 0)
+            return masterVolume * LotMultiplier;
+         return masterVolume * (AccountInfoDouble(ACCOUNT_BALANCE) / masterBalance) * LotMultiplier;
+
+      case LOT_EQUITY_RATIO:
+         if(masterEquity <= 0)
+            return masterVolume * LotMultiplier;
+         return masterVolume * (AccountInfoDouble(ACCOUNT_EQUITY) / masterEquity) * LotMultiplier;
+
+      case LOT_MULTIPLIER:
+      default:
+         return masterVolume * LotMultiplier;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Open a new slave position mirroring a newly-seen master position |
+//+------------------------------------------------------------------+
+void OpenNewSlavePosition(const SPositionRecord &mp, const STradeSnapshotHeader &header)
+{
+   string slaveSymbol = TC_MapSymbol(SymbolMap, mp.symbol, SlaveSymbolSuffix);
+   if(!SymbolSelect(slaveSymbol, true))
+   {
+      PrintFormat("TC_Slave: symbol '%s' (mapped from '%s') not available, skipping master ticket #%d", slaveSymbol, mp.symbol, (int)mp.ticket);
+      return;
+   }
+   g_trade.SetTypeFillingBySymbol(slaveSymbol);
+
+   int effType = mp.posType;
+   if(ReverseTrade) effType = 1 - effType;
+
+   double lots = ComputeLotSize(mp.volume, header.balance, header.equity);
+   lots = TC_NormalizeVolume(slaveSymbol, lots);
+   if(lots <= 0)
+   {
+      PrintFormat("TC_Slave: computed lot size <= 0 for master ticket #%d, skipping", (int)mp.ticket);
+      return;
+   }
+
+   double effSl = ReverseTrade ? mp.tp : mp.sl;
+   double effTp = ReverseTrade ? mp.sl : mp.tp;
+
+   double price = (effType == POSITION_TYPE_BUY)
+                     ? SymbolInfoDouble(slaveSymbol, SYMBOL_ASK)
+                     : SymbolInfoDouble(slaveSymbol, SYMBOL_BID);
+
+   string comment = "TC:" + IntegerToString((long)mp.ticket);
+   bool ok = (effType == POSITION_TYPE_BUY)
+                ? g_trade.Buy(lots, slaveSymbol, price, effSl, effTp, comment)
+                : g_trade.Sell(lots, slaveSymbol, price, effSl, effTp, comment);
+
+   if(!ok)
+   {
+      PrintFormat("TC_Slave: failed to open %s %s %.2f lots for master ticket #%d - retcode %d (%s)",
+                  (effType == POSITION_TYPE_BUY ? "BUY" : "SELL"), slaveSymbol, lots, (int)mp.ticket,
+                  g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
+      return;
+   }
+
+   // On MT5 a position's ticket equals the ticket of the order that opened it.
+   ulong slaveTicket = g_trade.ResultOrder();
+
+   SMapEntry entry;
+   entry.masterTicket     = mp.ticket;
+   entry.slaveTicket      = slaveTicket;
+   entry.slaveSymbol      = slaveSymbol;
+   entry.lastMasterVolume = mp.volume;
+   entry.lastSl = mp.sl;
+   entry.lastTp = mp.tp;
+
+   int idx = ArraySize(g_map);
+   ArrayResize(g_map, idx + 1);
+   g_map[idx] = entry;
+
+   PrintFormat("TC_Slave: opened %s %s %.2f lots (slave #%d) mirroring master ticket #%d",
+               (effType == POSITION_TYPE_BUY ? "BUY" : "SELL"), slaveSymbol, lots, (int)slaveTicket, (int)mp.ticket);
+}
+
+//+------------------------------------------------------------------+
+//| Diff an existing mapped position: partial close + SL/TP changes  |
+//+------------------------------------------------------------------+
+void UpdateExistingSlavePosition(const SPositionRecord &mp, int idx)
+{
+   double volDelta = g_map[idx].lastMasterVolume - mp.volume;
+
+   if(volDelta > 0.0000001)
+   {
+      double closeFraction = volDelta / g_map[idx].lastMasterVolume;
+
+      if(PositionSelectByTicket(g_map[idx].slaveTicket))
+      {
+         double slaveVol = PositionGetDouble(POSITION_VOLUME);
+         double slaveCloseVol = TC_NormalizeVolume(g_map[idx].slaveSymbol, slaveVol * closeFraction);
+
+         if(slaveCloseVol >= slaveVol)
+         {
+            g_trade.PositionClose(g_map[idx].slaveTicket);
+         }
+         else if(slaveCloseVol > 0)
+         {
+            g_trade.PositionClosePartial(g_map[idx].slaveTicket, slaveCloseVol);
+         }
+      }
+      g_map[idx].lastMasterVolume = mp.volume;
+   }
+   else if(volDelta < -0.0000001)
+   {
+      // Master added to the position. Pyramiding into the existing slave
+      // position isn't supported yet - just re-baseline so a later partial
+      // close is measured against the new (larger) master volume.
+      g_map[idx].lastMasterVolume = mp.volume;
+   }
+
+   bool slChanged = MathAbs(mp.sl - g_map[idx].lastSl) > 0.0000001;
+   bool tpChanged = MathAbs(mp.tp - g_map[idx].lastTp) > 0.0000001;
+
+   if(slChanged || tpChanged)
+   {
+      double effSl = ReverseTrade ? mp.tp : mp.sl;
+      double effTp = ReverseTrade ? mp.sl : mp.tp;
+
+      if(PositionSelectByTicket(g_map[idx].slaveTicket))
+         g_trade.PositionModify(g_map[idx].slaveTicket, effSl, effTp);
+
+      g_map[idx].lastSl = mp.sl;
+      g_map[idx].lastTp = mp.tp;
+   }
+}
+
+//+------------------------------------------------------------------+
+void CloseSlavePosition(const SMapEntry &entry)
+{
+   if(PositionSelectByTicket(entry.slaveTicket))
+   {
+      g_trade.PositionClose(entry.slaveTicket);
+      PrintFormat("TC_Slave: closed slave #%d following close of master ticket #%d", (int)entry.slaveTicket, (int)entry.masterTicket);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Equity protection                                                 |
+//+------------------------------------------------------------------+
+void CheckEquityProtection()
+{
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(eq > g_peakEquity)
+      g_peakEquity = eq;
+
+   if(g_halted)
+      return;
+
+   bool breach = false;
+   if(EquityFloor > 0 && eq <= EquityFloor)
+      breach = true;
+
+   if(!breach && MaxDrawdownPercent > 0 && g_peakEquity > 0)
+   {
+      double ddPct = (g_peakEquity - eq) / g_peakEquity * 100.0;
+      if(ddPct >= MaxDrawdownPercent)
+         breach = true;
+   }
+
+   if(breach)
+   {
+      g_halted = true;
+      PrintFormat("TC_Slave: EQUITY PROTECTION TRIGGERED (equity=%.2f, peak=%.2f). New trade copying halted; restart the EA to resume.", eq, g_peakEquity);
+
+      if(CloseAllOnEquityBreach)
+         CloseAllManagedPositions();
+   }
+}
+
+void CloseAllManagedPositions()
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetInteger(POSITION_MAGIC) != SlaveMagic) continue;
+      g_trade.PositionClose(ticket);
+   }
+   ArrayResize(g_map, 0);
+   PrintFormat("TC_Slave: equity protection closed all managed positions.");
+}
+
+//+------------------------------------------------------------------+
+//| Map helpers                                                       |
+//+------------------------------------------------------------------+
+int FindMapIndexByMasterTicket(ulong masterTicket)
+{
+   for(int i = 0; i < ArraySize(g_map); i++)
+      if(g_map[i].masterTicket == masterTicket)
+         return i;
+   return -1;
+}
+
+bool IsMasterTicketPresent(const SPositionRecord &positions[], ulong masterTicket)
+{
+   for(int i = 0; i < ArraySize(positions); i++)
+      if(positions[i].ticket == masterTicket)
+         return true;
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Ticket-map persistence (local terminal Files folder - NOT common,|
+//| each destination terminal keeps its own map on disk so an EA/    |
+//| terminal restart doesn't lose track of what it already copied)   |
+//+------------------------------------------------------------------+
+void SaveMap()
+{
+   int handle = FileOpen(g_mapFileName, FILE_WRITE | FILE_TXT | FILE_ANSI);
+   if(handle == INVALID_HANDLE)
+   {
+      PrintFormat("TC_Slave: failed to save ticket map '%s', error %d", g_mapFileName, GetLastError());
+      return;
+   }
+
+   FileWriteString(handle, "TCMAP1\r\n");
+   for(int i = 0; i < ArraySize(g_map); i++)
+   {
+      string parts[7];
+      parts[0] = "M";
+      parts[1] = IntegerToString((long)g_map[i].masterTicket);
+      parts[2] = IntegerToString((long)g_map[i].slaveTicket);
+      parts[3] = g_map[i].slaveSymbol;
+      parts[4] = DoubleToString(g_map[i].lastMasterVolume, 2);
+      parts[5] = DoubleToString(g_map[i].lastSl, 8);
+      parts[6] = DoubleToString(g_map[i].lastTp, 8);
+      FileWriteString(handle, TC_Join(parts) + "\r\n");
+   }
+   FileClose(handle);
+}
+
+void LoadMap()
+{
+   ArrayResize(g_map, 0);
+
+   if(!FileIsExist(g_mapFileName))
+      return;
+
+   int handle = FileOpen(g_mapFileName, FILE_READ | FILE_TXT | FILE_ANSI);
+   if(handle == INVALID_HANDLE)
+      return;
+
+   bool first = true;
+   while(!FileIsEnding(handle))
+   {
+      string line = FileReadString(handle);
+      if(StringLen(line) == 0)
+         continue;
+
+      if(first)
+      {
+         first = false;
+         continue; // header line
+      }
+
+      string parts[];
+      int n = TC_Split(line, parts);
+      if(n < 7 || parts[0] != "M")
+         continue;
+
+      SMapEntry entry;
+      entry.masterTicket     = (ulong)StringToInteger(parts[1]);
+      entry.slaveTicket      = (ulong)StringToInteger(parts[2]);
+      entry.slaveSymbol      = parts[3];
+      entry.lastMasterVolume = StringToDouble(parts[4]);
+      entry.lastSl = StringToDouble(parts[5]);
+      entry.lastTp = StringToDouble(parts[6]);
+
+      // Drop stale entries whose slave position no longer exists (e.g. it was
+      // closed manually while the terminal was offline) so we don't try to
+      // manage a ticket that isn't there.
+      if(PositionSelectByTicket(entry.slaveTicket))
+      {
+         int idx = ArraySize(g_map);
+         ArrayResize(g_map, idx + 1);
+         g_map[idx] = entry;
+      }
+   }
+   FileClose(handle);
+}

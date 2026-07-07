@@ -1,0 +1,5 @@
+# Compiled MQL5 binaries and editor cache - never commit these, they're generated
+# by MetaEditor from the .mq5/.mqh sources in this repo.
+*.ex5
+*.ex4
+*.log
