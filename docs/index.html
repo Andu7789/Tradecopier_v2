@@ -208,10 +208,25 @@
   .pl-neg { color:#f66; font-weight:700; }
 
   /* --- tables --- */
-  table.params { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 6px; }
-  table.params th, table.params td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  table.params th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-  table.params td:first-child { white-space: nowrap; font-family: ui-monospace, monospace; font-size: 12.5px; color: var(--accent); }
+  .param-group { margin-bottom: 30px; }
+  .param-group:last-child { margin-bottom: 0; }
+  .param-group > h4 {
+    font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--accent); margin: 0 0 12px; font-weight: 700;
+  }
+  .param-item {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 15px 18px; margin-bottom: 10px;
+  }
+  .param-item:last-child { margin-bottom: 0; }
+  .param-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 7px; }
+  .param-name { font-family: ui-monospace, monospace; font-weight: 700; font-size: 14px; }
+  .param-default { font-size: 11px; color: var(--muted); background: var(--code-bg); padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+  .param-item p { margin: 0; color: var(--text); font-size: 13.5px; }
+  .param-item p + p { margin-top: 8px; }
+  .param-item ul { margin: 8px 0 0; padding-left: 20px; font-size: 13.5px; color: var(--text); }
+  .param-item ul li { margin-bottom: 5px; }
+  .param-item ul li:last-child { margin-bottom: 0; }
 
   .tabs { display: flex; gap: 8px; margin-bottom: 18px; }
   .tab-btn {
@@ -502,6 +517,13 @@ python app.py</code></pre>
   <section id="parameters">
     <h2>Input parameters</h2>
     <h3>Configured per account, via each EA's MT5 inputs</h3>
+    <p class="lead">
+      Every setting below, in plain English, with the exact input name you'll see in MT5
+      shown alongside it. One thing worth knowing: MT5's Inputs dialog shows each input's
+      <em>description</em> as the row label instead of its actual name, whenever that
+      input has one — so if a row looks unfamiliar, widen the "Variable" column (or the
+      whole window) and match its full description text against the explanations below.
+    </p>
 
     <div class="tabs">
       <button class="tab-btn active" onclick="showTab('master', this)">TC_Master</button>
@@ -509,106 +531,177 @@ python app.py</code></pre>
     </div>
 
     <div id="tab-master" class="tab-panel active">
-      <table class="params">
-        <thead><tr><th>Input</th><th>Meaning</th></tr></thead>
-        <tbody>
-          <tr><td>MasterID</td><td>Identifier slaves use to find this master. Blank = account login number.</td></tr>
-          <tr><td>UpdateIntervalMs</td><td>How often to publish the snapshot.</td></tr>
-          <tr><td>MagicFilter</td><td>Only publish positions with this magic number (0 = all).</td></tr>
-        </tbody>
-      </table>
+      <div class="param-group">
+        <h4>Publishing</h4>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">MasterID</span><span class="param-default">default: blank</span></div>
+          <p>The name other accounts use to find this master. Leave it blank and it
+          defaults to this account's own login number — simplest option is to leave it
+          blank here and just tell every slave that login number.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">UpdateIntervalMs</span><span class="param-default">default: 250</span></div>
+          <p>How often (in milliseconds) this account publishes its current positions for
+          slaves to pick up. 250ms means it publishes 4 times a second.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">MagicFilter</span><span class="param-default">default: 0 (all)</span></div>
+          <p>Only publish positions tagged with this exact magic number. Leave at 0 to
+          publish everything open on this account, no matter what opened it.</p>
+        </div>
+      </div>
     </div>
 
     <div id="tab-slave" class="tab-panel">
-      <table class="params">
-        <thead><tr><th>Input</th><th>Meaning</th></tr></thead>
-        <tbody>
-          <tr><td>MasterID</td><td>Must exactly match the master's <code>MasterID</code>.</td></tr>
-          <tr><td>PollIntervalMs</td><td>How often to check for changes.</td></tr>
-          <tr><td>MaxStaleSeconds</td><td>Ignore snapshots older than this (machine clock, not broker server time) — protects against a frozen/crashed master or terminal.</td></tr>
-          <tr><td>MagicFilterMaster</td><td>Only copy master positions with this magic (0 = all).</td></tr>
-          <tr><td>SymbolBlacklist</td><td>CSV of master symbol names to never copy.</td></tr>
-          <tr><td>SymbolMap</td><td>CSV <code>MASTERSYM:SLAVESYM,...</code> for broker symbol-name differences, e.g. <code>GOLD:XAUUSD</code>.</td></tr>
-          <tr><td>SlaveSymbolSuffix</td><td>Appended to the mapped symbol if missing, e.g. <code>.a</code>.</td></tr>
-          <tr><td>ReverseTrade</td><td>Mirror buys as sells and vice versa (SL/TP swapped accordingly).</td></tr>
-          <tr><td>LotMode</td><td><code>LOT_FIXED</code>, <code>LOT_MULTIPLIER</code>, <code>LOT_BALANCE_RATIO</code>, or <code>LOT_EQUITY_RATIO</code>.</td></tr>
-          <tr><td>FixedLot / LotMultiplier</td><td>Sizing parameters for the mode above.</td></tr>
-          <tr><td>SlaveMagic</td><td>Magic number tagged on every trade this EA opens; also scopes which positions belong to it.</td></tr>
-          <tr><td>MaxSlippagePoints</td><td>Max slippage allowed on market execution.</td></tr>
-          <tr><td>EquityFloor</td><td>Halt new copying once account equity drops to/below this (0 = disabled).</td></tr>
-          <tr><td>MaxDrawdownPercent</td><td>Halt new copying once equity drawdown from this EA's peak reaches this % (0 = disabled).</td></tr>
-          <tr><td>CloseAllOnEquityBreach</td><td>If true, force-close everything tagged with <code>SlaveMagic</code> when equity protection triggers.</td></tr>
-          <tr><td>DailyLossLimitPercent</td><td>Force-close everything if today's loss reaches this % of the equity first seen today (0 = disabled). Auto-resumes the next broker day.</td></tr>
-          <tr><td>MaxTotalRiskPercent</td><td>Hard cap on total open risk as a % of equity — new trades that would breach it are skipped (0 = disabled).</td></tr>
-        </tbody>
-      </table>
-    </div>
 
-    <h4 style="margin-top:36px;">How the trickier slave settings actually work</h4>
-    <div class="grid3">
-      <div class="feature">
-        <h4>Lot sizing modes (<code>LotMode</code>)</h4>
-        <p><code>LOT_FIXED</code> always trades <code>FixedLot</code>, ignoring the
-        master's volume entirely. <code>LOT_MULTIPLIER</code> is
-        <code>masterVolume × LotMultiplier</code> — e.g. master trades 1.00 lots,
-        <code>LotMultiplier = 0.5</code> → this account trades 0.50 lots.
-        <code>LOT_BALANCE_RATIO</code> / <code>LOT_EQUITY_RATIO</code> scale that by how
-        big <em>this</em> account is versus the master's — e.g. this account's balance is
-        half the master's → it automatically trades half the lots, so accounts of very
-        different sizes can all follow the same master proportionally.</p>
+      <div class="param-group">
+        <h4>Which master to follow</h4>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">MasterID</span><span class="param-default">default: blank</span></div>
+          <p>Must exactly match the value set on the master (or its login number, if the
+          master left <code>MasterID</code> blank). This is how a slave finds the right
+          snapshot file — get it wrong and this account simply never sees any master data.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">PollIntervalMs</span><span class="param-default">default: 250</span></div>
+          <p>How often this account checks the master's file for changes. 250ms means 4
+          checks a second.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">MaxStaleSeconds</span><span class="param-default">default: 5</span></div>
+          <p>Safety check: if the master hasn't updated its file in this many seconds,
+          treat it as offline and freeze — no opens, closes, or modifies — rather than act
+          on information that might be out of date. Protects against a frozen or crashed
+          master terminal.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">MagicFilterMaster</span><span class="param-default">default: 0 (all)</span></div>
+          <p>Only copy master positions tagged with this exact magic number. Leave at 0 to
+          copy everything the master has open.</p>
+        </div>
       </div>
-      <div class="feature">
-        <h4>Symbol renaming (<code>SymbolMap</code>, <code>SlaveSymbolSuffix</code>, <code>SymbolBlacklist</code>)</h4>
-        <p>If the master trades a symbol in <code>SymbolBlacklist</code>, it's skipped
-        entirely — never copied. Otherwise, <code>SymbolMap</code> renames it if your two
-        brokers use different names for the same thing (master calls gold <code>GOLD</code>,
-        your broker calls it <code>XAUUSD</code> → set <code>GOLD:XAUUSD</code>). Then
-        <code>SlaveSymbolSuffix</code> is appended automatically if it isn't already there
-        (e.g. <code>.a</code> turns <code>EURUSD</code> into <code>EURUSD.a</code>), for
-        brokers that tag every symbol with a suffix.</p>
+
+      <div class="param-group">
+        <h4>Which trades get copied, and onto what symbol</h4>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">SymbolBlacklist</span><span class="param-default">default: blank</span></div>
+          <p>Symbols to never copy, no matter what. Comma-separated, e.g.
+          <code>US30,XAUUSD</code> — if the master opens either of those, this account
+          ignores it completely.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">SymbolMap</span><span class="param-default">default: blank</span></div>
+          <p>Renames a symbol when your two brokers call the same instrument something
+          different. Example: master's broker calls gold <code>GOLD</code>, yours calls it
+          <code>XAUUSD</code> → set <code>GOLD:XAUUSD</code>. You can map several,
+          separated by commas: <code>GOLD:XAUUSD,OIL:USOUSD</code>.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">SlaveSymbolSuffix</span><span class="param-default">default: blank</span></div>
+          <p>Appended automatically to the (possibly renamed) symbol if it isn't already
+          there — for brokers that tag every symbol, e.g. <code>EURUSD.a</code> instead of
+          <code>EURUSD</code>. Set this to <code>.a</code> and it's added wherever needed,
+          without you having to bake it into every <code>SymbolMap</code> entry.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">ReverseTrade</span><span class="param-default">default: false</span></div>
+          <p>Turn this on to mirror the opposite direction: every master BUY opens as a
+          SELL here, and vice versa. The stop-loss/take-profit levels are swapped
+          automatically so they still make sense for the reversed trade — a stop-loss only
+          means something relative to a trade's direction, so once the direction flips,
+          the master's stop-loss level becomes the correct take-profit for this account
+          (and vice versa). You don't need to configure anything extra for that swap.</p>
+        </div>
       </div>
-      <div class="feature">
-        <h4>Mirrored in reverse (<code>ReverseTrade</code>)</h4>
-        <p>Turn this on and every master BUY opens as a SELL here, and vice versa — a
-        single on/off switch, not two settings. The SL/TP swap isn't separate either: a
-        stop-loss only makes sense relative to a trade's direction, so once the direction
-        flips, the master's stop-loss level is exactly what the take-profit should be for
-        the reversed trade (and vice versa) — the EA does that swap for you automatically.</p>
+
+      <div class="param-group">
+        <h4>How big each copied trade is</h4>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">LotMode</span><span class="param-default">default: LOT_MULTIPLIER</span></div>
+          <p>Which formula decides the lot size of every trade this account opens:</p>
+          <ul>
+            <li><strong>LOT_FIXED</strong> — always trades <code>FixedLot</code> lots, ignoring the master's volume entirely.</li>
+            <li><strong>LOT_MULTIPLIER</strong> — <code>masterVolume × LotMultiplier</code>. E.g. master trades 1.00 lots, <code>LotMultiplier = 0.5</code> → this account trades 0.50 lots.</li>
+            <li><strong>LOT_BALANCE_RATIO</strong> — scales by this account's balance versus the master's. E.g. this account's balance is half the master's → it automatically trades half the lots.</li>
+            <li><strong>LOT_EQUITY_RATIO</strong> — same idea as above, but using equity instead of balance.</li>
+          </ul>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">FixedLot</span><span class="param-default">default: 0.01</span></div>
+          <p>The lot size used for every trade when <code>LotMode = LOT_FIXED</code>.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">LotMultiplier</span><span class="param-default">default: 1.0</span></div>
+          <p>The multiplier used by <code>LOT_MULTIPLIER</code>, <code>LOT_BALANCE_RATIO</code>, and <code>LOT_EQUITY_RATIO</code> (see above).</p>
+        </div>
       </div>
-      <div class="feature">
-        <h4>The two equity halts (<code>EquityFloor</code>, <code>MaxDrawdownPercent</code>)</h4>
-        <p><code>EquityFloor</code> is a hard number — set it to <code>9000</code> and
-        trading halts the moment equity hits £9,000. <code>MaxDrawdownPercent</code> is a
-        % drop from the highest equity this EA has seen since it started — e.g. equity
-        peaks at £11,000, <code>MaxDrawdownPercent = 10</code> → halts if equity then falls
-        to £9,900 or below. Either one alone can trigger it; set the one you don't want to
-        <code>0</code> to disable it. Once halted, new copied trades stop opening
-        (existing ones still get closed/modified as normal) until you restart the EA — it
-        does not resume on its own. Turning on <code>CloseAllOnEquityBreach</code> makes it
-        also force-close every position tagged with <code>SlaveMagic</code> the instant it
-        halts, instead of just freezing new opens.</p>
+
+      <div class="param-group">
+        <h4>Identifying this account's own trades</h4>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">SlaveMagic</span><span class="param-default">default: 990001</span></div>
+          <p>The magic number tagged on every trade this EA opens, so it can tell "its own"
+          trades apart from manual trades or other EAs on this account. Also used to decide
+          which positions get swept during equity protection / force-closes.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">MaxSlippagePoints</span><span class="param-default">default: 30</span></div>
+          <p>Maximum price slippage (in points) allowed when placing a market order. If the
+          price has moved further than this by the time the order reaches the broker, it's
+          rejected instead of being filled at a worse price.</p>
+        </div>
       </div>
-      <div class="feature">
-        <h4>Daily loss limit (<code>DailyLossLimitPercent</code>)</h4>
-        <p>A separate, simpler rule aimed at "don't lose more than X% today." Set it to
-        <code>3</code> and if equity ever falls 3% below wherever it was when this EA first
-        saw today, everything gets force-closed for the rest of the day. Unlike the two
-        halts above, <strong>this one resumes on its own</strong> the next broker day, using
-        that new day's equity as the fresh starting point — you don't need to restart
-        anything. One caveat: if you restart the EA partway through a day, that moment's
-        equity becomes the new "start of day" reference, not midnight's true value.</p>
+
+      <div class="param-group">
+        <h4>Risk &amp; safety limits</h4>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">EquityFloor</span><span class="param-default">default: 0 (disabled)</span></div>
+          <p>A hard equity number. Set it to <code>9000</code> and new copying halts the
+          moment equity hits £9,000 or below.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">MaxDrawdownPercent</span><span class="param-default">default: 0 (disabled)</span></div>
+          <p>A % drop from the highest equity this EA has seen since it started. Example:
+          equity peaks at £11,000, set this to <code>10</code> → halts if equity then falls
+          to £9,900 or below (10% down from that peak). This and <code>EquityFloor</code>
+          trigger independently — you don't need both; set whichever one you don't want to
+          <code>0</code>.</p>
+          <p>Once either one triggers, new copied trades stop opening (existing ones still
+          get closed/modified as normal) until you restart the EA — <strong>it does not
+          resume on its own.</strong></p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">CloseAllOnEquityBreach</span><span class="param-default">default: false</span></div>
+          <p>When either equity halt above triggers, turning this on also force-closes
+          every position this EA has open immediately, instead of just freezing new
+          copying and leaving existing positions running.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">DailyLossLimitPercent</span><span class="param-default">default: 0 (disabled)</span></div>
+          <p>A separate, simpler rule: "don't lose more than X% today." Set it to
+          <code>3</code> and if equity ever falls 3% below wherever it was when this EA
+          first saw today, everything gets force-closed for the rest of the day.</p>
+          <p>Unlike <code>EquityFloor</code>/<code>MaxDrawdownPercent</code> above,
+          <strong>this one resumes on its own</strong> the next broker day, using that new
+          day's equity as the fresh starting point — no restart needed. One caveat: if you
+          restart the EA partway through a day, that moment's equity becomes the new
+          "start of day" reference, not midnight's true value.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">MaxTotalRiskPercent</span><span class="param-default">default: 0 (disabled)</span></div>
+          <p>Caps how much you could lose across <em>everything currently open at once</em>
+          — not equity after the fact, but risk before it happens. For every open position
+          it works out "if this position's stop-loss got hit right now, how much would
+          that lose," and adds those up across all of them.</p>
+          <p>Set this to <code>2</code> and a new trade only opens if doing so keeps that
+          running total at or under 2% of equity — otherwise the trade is skipped
+          entirely for that cycle (not opened smaller, just not opened; it's retried
+          again next cycle in case equity or open risk has since changed). Any master
+          position with no stop-loss is always skipped under this rule, since there'd be
+          no way to know how much it could lose.</p>
+        </div>
       </div>
-      <div class="feature">
-        <h4>Total risk cap (<code>MaxTotalRiskPercent</code>)</h4>
-        <p>Caps how much you could lose across <em>everything currently open</em> at once,
-        not equity after the fact. For every open position it calculates "if the stop-loss
-        got hit right now, how much money would that lose" and adds those up. Set this to
-        <code>2</code> and a new trade only opens if doing so keeps that running total at
-        or under 2% of equity — otherwise the trade is skipped for that cycle entirely (it
-        isn't opened smaller, just not opened). Any master position with no stop-loss is
-        always skipped under this rule, since there'd be no way to know how much it could
-        lose.</p>
-      </div>
+
     </div>
   </section>
 
