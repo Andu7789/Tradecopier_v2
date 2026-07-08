@@ -542,6 +542,42 @@ python app.py</code></pre>
       </table>
     </div>
 
+    <h4 style="margin-top:36px;">How the trickier slave settings actually work</h4>
+    <div class="grid3">
+      <div class="feature">
+        <h4>Lot sizing modes</h4>
+        <p><code>LOT_FIXED</code> always uses <code>FixedLot</code>, ignoring the master's
+        volume entirely. <code>LOT_MULTIPLIER</code> is <code>masterVolume × LotMultiplier</code>.
+        <code>LOT_BALANCE_RATIO</code> / <code>LOT_EQUITY_RATIO</code> scale that by the
+        ratio of <em>this</em> account's current balance/equity to the master's
+        balance/equity at snapshot time, so a smaller or larger destination account follows
+        proportionally instead of copying raw lots.</p>
+      </div>
+      <div class="feature">
+        <h4>Symbol mapping order</h4>
+        <p><code>SymbolMap</code> is checked first (exact master symbol → replacement, e.g.
+        <code>GOLD:XAUUSD</code>). Whatever name results — mapped or original — then gets
+        <code>SlaveSymbolSuffix</code> appended, but only if it isn't already present, so
+        re-running the map is idempotent.</p>
+      </div>
+      <div class="feature">
+        <h4>Reverse trade &amp; SL/TP</h4>
+        <p>With <code>ReverseTrade</code> on, buys mirror as sells and vice versa. Because
+        SL/TP are always relative to a position's own direction, the master's stop-loss
+        becomes the mirrored position's <em>take-profit</em> level (and vice versa) — the
+        EA swaps them automatically every time it copies SL/TP, not just on open.</p>
+      </div>
+      <div class="feature">
+        <h4>Equity protection</h4>
+        <p>Triggers on either condition independently: equity at/below
+        <code>EquityFloor</code>, <em>or</em> drawdown from this EA's own peak equity
+        reaching <code>MaxDrawdownPercent</code>. Once triggered it stops opening new
+        copied trades (existing ones still get closes/modifies applied) unless
+        <code>CloseAllOnEquityBreach</code> is on, which force-closes everything tagged
+        with <code>SlaveMagic</code> immediately.</p>
+      </div>
+    </div>
+
     <div class="callout" style="margin-top:20px;">
       <strong>Equity protection doesn't auto-resume.</strong> Once triggered, the slave EA
       stops opening new copied trades until it's restarted — a breach always gets human
