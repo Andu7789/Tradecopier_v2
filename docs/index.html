@@ -538,6 +538,8 @@ python app.py</code></pre>
           <tr><td>EquityFloor</td><td>Halt new copying once account equity drops to/below this (0 = disabled).</td></tr>
           <tr><td>MaxDrawdownPercent</td><td>Halt new copying once equity drawdown from this EA's peak reaches this % (0 = disabled).</td></tr>
           <tr><td>CloseAllOnEquityBreach</td><td>If true, force-close everything tagged with <code>SlaveMagic</code> when equity protection triggers.</td></tr>
+          <tr><td>DailyLossLimitPercent</td><td>Force-close everything if today's loss reaches this % of the equity first seen today (0 = disabled). Auto-resumes the next broker day.</td></tr>
+          <tr><td>MaxTotalRiskPercent</td><td>Hard cap on total open risk as a % of equity — new trades that would breach it are skipped (0 = disabled).</td></tr>
         </tbody>
       </table>
     </div>
@@ -545,43 +547,68 @@ python app.py</code></pre>
     <h4 style="margin-top:36px;">How the trickier slave settings actually work</h4>
     <div class="grid3">
       <div class="feature">
-        <h4>Lot sizing modes</h4>
-        <p><code>LOT_FIXED</code> always uses <code>FixedLot</code>, ignoring the master's
-        volume entirely. <code>LOT_MULTIPLIER</code> is <code>masterVolume × LotMultiplier</code>.
-        <code>LOT_BALANCE_RATIO</code> / <code>LOT_EQUITY_RATIO</code> scale that by the
-        ratio of <em>this</em> account's current balance/equity to the master's
-        balance/equity at snapshot time, so a smaller or larger destination account follows
-        proportionally instead of copying raw lots.</p>
+        <h4>Lot sizing modes (<code>LotMode</code>)</h4>
+        <p><code>LOT_FIXED</code> always trades <code>FixedLot</code>, ignoring the
+        master's volume entirely. <code>LOT_MULTIPLIER</code> is
+        <code>masterVolume × LotMultiplier</code> — e.g. master trades 1.00 lots,
+        <code>LotMultiplier = 0.5</code> → this account trades 0.50 lots.
+        <code>LOT_BALANCE_RATIO</code> / <code>LOT_EQUITY_RATIO</code> scale that by how
+        big <em>this</em> account is versus the master's — e.g. this account's balance is
+        half the master's → it automatically trades half the lots, so accounts of very
+        different sizes can all follow the same master proportionally.</p>
       </div>
       <div class="feature">
-        <h4>Symbol mapping order</h4>
-        <p><code>SymbolMap</code> is checked first (exact master symbol → replacement, e.g.
-        <code>GOLD:XAUUSD</code>). Whatever name results — mapped or original — then gets
-        <code>SlaveSymbolSuffix</code> appended, but only if it isn't already present, so
-        re-running the map is idempotent.</p>
+        <h4>Symbol renaming (<code>SymbolMap</code>, <code>SlaveSymbolSuffix</code>, <code>SymbolBlacklist</code>)</h4>
+        <p>If the master trades a symbol in <code>SymbolBlacklist</code>, it's skipped
+        entirely — never copied. Otherwise, <code>SymbolMap</code> renames it if your two
+        brokers use different names for the same thing (master calls gold <code>GOLD</code>,
+        your broker calls it <code>XAUUSD</code> → set <code>GOLD:XAUUSD</code>). Then
+        <code>SlaveSymbolSuffix</code> is appended automatically if it isn't already there
+        (e.g. <code>.a</code> turns <code>EURUSD</code> into <code>EURUSD.a</code>), for
+        brokers that tag every symbol with a suffix.</p>
       </div>
       <div class="feature">
-        <h4>Reverse trade &amp; SL/TP</h4>
-        <p>With <code>ReverseTrade</code> on, buys mirror as sells and vice versa. Because
-        SL/TP are always relative to a position's own direction, the master's stop-loss
-        becomes the mirrored position's <em>take-profit</em> level (and vice versa) — the
-        EA swaps them automatically every time it copies SL/TP, not just on open.</p>
+        <h4>Mirrored in reverse (<code>ReverseTrade</code>)</h4>
+        <p>Turn this on and every master BUY opens as a SELL here, and vice versa — a
+        single on/off switch, not two settings. The SL/TP swap isn't separate either: a
+        stop-loss only makes sense relative to a trade's direction, so once the direction
+        flips, the master's stop-loss level is exactly what the take-profit should be for
+        the reversed trade (and vice versa) — the EA does that swap for you automatically.</p>
       </div>
       <div class="feature">
-        <h4>Equity protection</h4>
-        <p>Triggers on either condition independently: equity at/below
-        <code>EquityFloor</code>, <em>or</em> drawdown from this EA's own peak equity
-        reaching <code>MaxDrawdownPercent</code>. Once triggered it stops opening new
-        copied trades (existing ones still get closes/modifies applied) unless
-        <code>CloseAllOnEquityBreach</code> is on, which force-closes everything tagged
-        with <code>SlaveMagic</code> immediately.</p>
+        <h4>The two equity halts (<code>EquityFloor</code>, <code>MaxDrawdownPercent</code>)</h4>
+        <p><code>EquityFloor</code> is a hard number — set it to <code>9000</code> and
+        trading halts the moment equity hits £9,000. <code>MaxDrawdownPercent</code> is a
+        % drop from the highest equity this EA has seen since it started — e.g. equity
+        peaks at £11,000, <code>MaxDrawdownPercent = 10</code> → halts if equity then falls
+        to £9,900 or below. Either one alone can trigger it; set the one you don't want to
+        <code>0</code> to disable it. Once halted, new copied trades stop opening
+        (existing ones still get closed/modified as normal) until you restart the EA — it
+        does not resume on its own. Turning on <code>CloseAllOnEquityBreach</code> makes it
+        also force-close every position tagged with <code>SlaveMagic</code> the instant it
+        halts, instead of just freezing new opens.</p>
       </div>
-    </div>
-
-    <div class="callout" style="margin-top:20px;">
-      <strong>Equity protection doesn't auto-resume.</strong> Once triggered, the slave EA
-      stops opening new copied trades until it's restarted — a breach always gets human
-      attention rather than silently recovering.
+      <div class="feature">
+        <h4>Daily loss limit (<code>DailyLossLimitPercent</code>)</h4>
+        <p>A separate, simpler rule aimed at "don't lose more than X% today." Set it to
+        <code>3</code> and if equity ever falls 3% below wherever it was when this EA first
+        saw today, everything gets force-closed for the rest of the day. Unlike the two
+        halts above, <strong>this one resumes on its own</strong> the next broker day, using
+        that new day's equity as the fresh starting point — you don't need to restart
+        anything. One caveat: if you restart the EA partway through a day, that moment's
+        equity becomes the new "start of day" reference, not midnight's true value.</p>
+      </div>
+      <div class="feature">
+        <h4>Total risk cap (<code>MaxTotalRiskPercent</code>)</h4>
+        <p>Caps how much you could lose across <em>everything currently open</em> at once,
+        not equity after the fact. For every open position it calculates "if the stop-loss
+        got hit right now, how much money would that lose" and adds those up. Set this to
+        <code>2</code> and a new trade only opens if doing so keeps that running total at
+        or under 2% of equity — otherwise the trade is skipped for that cycle entirely (it
+        isn't opened smaller, just not opened). Any master position with no stop-loss is
+        always skipped under this rule, since there'd be no way to know how much it could
+        lose.</p>
+      </div>
     </div>
   </section>
 

@@ -128,6 +128,37 @@ unless `CloseAllOnEquityBreach` force-closes everything immediately). It
 does not auto-resume — a deliberate restart is required, so a breach
 always gets human attention.
 
+## Daily loss limit
+
+`DailyLossLimitPercent` is a separate, per-day circuit breaker, deliberately
+different from `EquityFloor`/`MaxDrawdownPercent` above. Each cycle it checks
+the current broker date (`TimeCurrent()`) against the last date it saw; on a
+change, it records that moment's equity as the day's reference point. If
+equity ever falls that % below the day's reference point, it force-closes
+every `SlaveMagic` position and halts new opens — but unlike the other
+protections, it **auto-resumes** the next time a new broker day is detected,
+using that new day's opening equity as the fresh reference point. This means
+a mid-day EA restart resets the reference point to whatever equity the
+account has *at that moment*, not to midnight's true value — there's no way
+to recover a day's actual opening equity retroactively.
+
+## Total risk cap
+
+`MaxTotalRiskPercent` gates *what's allowed to open* rather than watching
+equity after the fact. Each slave computes the monetary risk of a position —
+what it would lose if its stop-loss were hit — via `OrderCalcProfit()`
+against that position's own SL, then sums this across every currently open
+`SlaveMagic` position. Before opening a new mirrored trade it checks whether
+`existingRisk + newTradeRisk` would exceed `MaxTotalRiskPercent`% of current
+equity; if so, the trade is skipped outright for that cycle (not resized,
+not queued — it's simply retried again next cycle, since account equity or
+open risk may have moved by then). A master position with no stop-loss is
+always skipped under this rule, since its risk can't be measured. Positions
+opened before this setting was enabled (or while it was 0) that have no SL
+are excluded from the running total for the same reason — a known blind spot
+worth being aware of if you enable this after already having unprotected
+positions open.
+
 ## Explicitly out of scope
 
 - Pending orders (limit/stop) are not copied — positions only.

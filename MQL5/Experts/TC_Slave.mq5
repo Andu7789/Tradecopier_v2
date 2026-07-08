@@ -48,6 +48,9 @@ input double           EquityFloor           = 0;       // Halt new copying if a
 input double           MaxDrawdownPercent    = 0;        // Halt new copying if equity drawdown from this EA's peak equity reaches this % (0 = disabled)
 input bool             CloseAllOnEquityBreach = false;   // If true, force-close every position tagged with SlaveMagic when the equity protection triggers
 
+input double           DailyLossLimitPercent = 0;        // Force-close everything if today's loss from this morning's starting equity reaches this % (0 = disabled). Auto-resumes the next broker day.
+input double           MaxTotalRiskPercent   = 0;        // Hard cap: total risk (sum of potential loss if every SlaveMagic position's SL were hit) must never exceed this % of equity. A new trade that would breach it, or has no SL, is skipped entirely. (0 = disabled)
+
 struct SMapEntry
 {
    ulong  masterTicket;
@@ -65,6 +68,10 @@ double      g_peakEquity;
 bool        g_halted = false;
 int         g_staleLogThrottle = 0;
 long        g_lastMasterAgeMs = -1; // -1 = master snapshot never seen at all
+
+double      g_dayAnchorEquity = 0;      // equity when this broker day was first seen
+int         g_dayAnchorYear = -1, g_dayAnchorMonth = -1, g_dayAnchorDay = -1;
+bool        g_dailyHalted = false;      // separate from g_halted - resets automatically each new broker day
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -111,6 +118,7 @@ void OnTimer()
 void RunCopyCycle()
 {
    CheckEquityProtection();
+   CheckDailyLossLimit();
 
    STradeSnapshotHeader header;
    SPositionRecord masterPositions[];
@@ -146,7 +154,7 @@ void RunCopyCycle()
       int idx = FindMapIndexByMasterTicket(mp.ticket);
       if(idx < 0)
       {
-         if(!g_halted)
+         if(!g_halted && !g_dailyHalted)
             OpenNewSlavePosition(mp, header);
       }
       else
@@ -267,6 +275,27 @@ void OpenNewSlavePosition(const SPositionRecord &mp, const STradeSnapshotHeader 
    double price = (effType == POSITION_TYPE_BUY)
                      ? SymbolInfoDouble(slaveSymbol, SYMBOL_ASK)
                      : SymbolInfoDouble(slaveSymbol, SYMBOL_BID);
+
+   if(MaxTotalRiskPercent > 0)
+   {
+      double newRisk = ComputePositionRisk(slaveSymbol, effType, lots, price, effSl);
+      if(newRisk < 0)
+      {
+         PrintFormat("TC_Slave: master ticket #%d would open with no stop-loss - skipping, since risk can't be measured under MaxTotalRiskPercent.", (int)mp.ticket);
+         return;
+      }
+
+      double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+      double maxAllowed = equity * MaxTotalRiskPercent / 100.0;
+      double existingRisk = ComputeTotalOpenRisk();
+
+      if(existingRisk + newRisk > maxAllowed)
+      {
+         PrintFormat("TC_Slave: skipping master ticket #%d - would take total open risk to %.2f (existing %.2f + new %.2f), cap is %.2f (%.2f%% of equity %.2f).",
+                     (int)mp.ticket, existingRisk + newRisk, existingRisk, newRisk, maxAllowed, MaxTotalRiskPercent, equity);
+         return;
+      }
+   }
 
    string comment = "TC:" + IntegerToString((long)mp.ticket);
    bool ok = (effType == POSITION_TYPE_BUY)
@@ -406,6 +435,98 @@ void CloseAllManagedPositions()
    }
    ArrayResize(g_map, 0);
    PrintFormat("TC_Slave: equity protection closed all managed positions.");
+}
+
+//+------------------------------------------------------------------+
+//| Daily loss limit - unlike EquityFloor/MaxDrawdownPercent, this is |
+//| a per-day circuit breaker: it force-closes everything once        |
+//| today's loss (from the equity first seen on this broker day)      |
+//| crosses the limit, then auto-resumes copying the next broker day. |
+//| Note: if the EA is (re)started partway through a day, that day's  |
+//| anchor is the equity at that moment, not midnight's equity.       |
+//+------------------------------------------------------------------+
+void CheckDailyLossLimit()
+{
+   if(DailyLossLimitPercent <= 0)
+      return;
+
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+
+   if(dt.year != g_dayAnchorYear || dt.mon != g_dayAnchorMonth || dt.day != g_dayAnchorDay)
+   {
+      g_dayAnchorYear   = dt.year;
+      g_dayAnchorMonth  = dt.mon;
+      g_dayAnchorDay    = dt.day;
+      g_dayAnchorEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+
+      if(g_dailyHalted)
+         PrintFormat("TC_Slave: new broker day - daily loss limit reset, copying resumed (anchor equity=%.2f).", g_dayAnchorEquity);
+      g_dailyHalted = false;
+   }
+
+   if(g_dailyHalted || g_dayAnchorEquity <= 0)
+      return;
+
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   double lossPct = (g_dayAnchorEquity - eq) / g_dayAnchorEquity * 100.0;
+
+   if(lossPct >= DailyLossLimitPercent)
+   {
+      g_dailyHalted = true;
+      PrintFormat("TC_Slave: DAILY LOSS LIMIT TRIGGERED (today's loss=%.2f%%, limit=%.2f%%). Closing all managed positions; copying halted until the next broker day.", lossPct, DailyLossLimitPercent);
+      CloseAllManagedPositions();
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Monetary risk (potential loss) if this position's SL is hit.      |
+//| Returns -1 if there's no SL, since risk can't be measured then.   |
+//+------------------------------------------------------------------+
+double ComputePositionRisk(const string symbol, int posType, double volume, double priceOpen, double sl)
+{
+   if(sl == 0)
+      return -1;
+
+   ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+
+   double profit = 0;
+   if(!OrderCalcProfit(orderType, symbol, volume, priceOpen, sl, profit))
+      return -1;
+
+   return MathAbs(profit);
+}
+
+//+------------------------------------------------------------------+
+//| Sum of risk across every currently open position tagged with     |
+//| SlaveMagic. A position with no SL contributes nothing to the sum |
+//| (its risk is unmeasurable) - a known limitation for any position |
+//| opened before MaxTotalRiskPercent was enabled.                   |
+//+------------------------------------------------------------------+
+double ComputeTotalOpenRisk()
+{
+   double total = 0;
+   for(int i = 0; i < PositionsTotal(); i++)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetInteger(POSITION_MAGIC) != SlaveMagic) continue;
+
+      double sl = PositionGetDouble(POSITION_SL);
+      if(sl == 0) continue;
+
+      double risk = ComputePositionRisk(
+         PositionGetString(POSITION_SYMBOL),
+         (int)PositionGetInteger(POSITION_TYPE),
+         PositionGetDouble(POSITION_VOLUME),
+         PositionGetDouble(POSITION_PRICE_OPEN),
+         sl);
+
+      if(risk > 0)
+         total += risk;
+   }
+   return total;
 }
 
 //+------------------------------------------------------------------+

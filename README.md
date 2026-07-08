@@ -115,9 +115,30 @@ TC_COMMON_FOLDER="C:\Users\you\AppData\Roaming\MetaQuotes\Terminal\Common\Files"
 | `EquityFloor` | Halt new copying once account equity drops to/below this (0 = disabled). |
 | `MaxDrawdownPercent` | Halt new copying once equity drawdown from this EA's peak reaches this % (0 = disabled). |
 | `CloseAllOnEquityBreach` | If true, force-close everything tagged with `SlaveMagic` when equity protection triggers. |
+| `DailyLossLimitPercent` | Force-close everything if today's loss (from the equity level first seen on this broker day) reaches this % (0 = disabled). |
+| `MaxTotalRiskPercent` | Hard cap on total open risk (see below) as a % of equity (0 = disabled). |
 
-Once equity protection triggers, the EA stops opening new trades until it's
-restarted — it does not auto-resume.
+Once `EquityFloor` or `MaxDrawdownPercent` triggers, the EA stops opening new
+trades until it's restarted — it does not auto-resume. `DailyLossLimitPercent`
+is different: it's a per-day circuit breaker, so it force-closes everything
+for the rest of that broker day, then **resumes on its own** at the start of
+the next broker day, using that day's opening equity as the new reference
+point. (Caveat: if the EA is restarted partway through a day, that day's
+reference point becomes whatever equity it had at that moment, not
+midnight's — there's no way to recover a day's true opening equity after
+the fact.)
+
+`MaxTotalRiskPercent` works differently from the other protections above —
+it doesn't watch equity, it gates what's allowed to open in the first place.
+Each destination account computes its own "risk" per position as the money
+it would lose if that position's stop-loss were hit, then sums that across
+every position the EA has open. Before opening a new mirrored trade, it
+checks whether adding that trade's risk would push the total over
+`MaxTotalRiskPercent`% of current equity — if so, the trade is skipped
+entirely (not opened smaller, not queued, just skipped for that cycle; it'll
+be retried on the next cycle in case account equity or open risk has since
+changed). A master position with no stop-loss is always skipped under this
+rule, since there's no way to measure how much it could lose.
 
 ## Disclaimer
 
