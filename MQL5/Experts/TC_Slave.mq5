@@ -73,6 +73,9 @@ double      g_dayAnchorEquity = 0;      // equity when this broker day was first
 int         g_dayAnchorYear = -1, g_dayAnchorMonth = -1, g_dayAnchorDay = -1;
 bool        g_dailyHalted = false;      // separate from g_halted - resets automatically each new broker day
 
+ulong       g_alertedNoSl[];     // master tickets already popped-up about for having no SL, so we don't re-alert every poll cycle
+ulong       g_alertedRiskCap[];  // master tickets already popped-up about for breaching MaxTotalRiskPercent
+
 //+------------------------------------------------------------------+
 int OnInit()
 {
@@ -282,6 +285,11 @@ void OpenNewSlavePosition(const SPositionRecord &mp, const STradeSnapshotHeader 
       if(newRisk < 0)
       {
          PrintFormat("TC_Slave: master ticket #%d would open with no stop-loss - skipping, since risk can't be measured under MaxTotalRiskPercent.", (int)mp.ticket);
+         if(!TicketInArray(g_alertedNoSl, mp.ticket))
+         {
+            AddTicketToArray(g_alertedNoSl, mp.ticket);
+            Alert(StringFormat("TC_Slave: master ticket #%d has no stop-loss - skipped, since MaxTotalRiskPercent requires one to measure risk.", (int)mp.ticket));
+         }
          return;
       }
 
@@ -293,6 +301,12 @@ void OpenNewSlavePosition(const SPositionRecord &mp, const STradeSnapshotHeader 
       {
          PrintFormat("TC_Slave: skipping master ticket #%d - would take total open risk to %.2f (existing %.2f + new %.2f), cap is %.2f (%.2f%% of equity %.2f).",
                      (int)mp.ticket, existingRisk + newRisk, existingRisk, newRisk, maxAllowed, MaxTotalRiskPercent, equity);
+         if(!TicketInArray(g_alertedRiskCap, mp.ticket))
+         {
+            AddTicketToArray(g_alertedRiskCap, mp.ticket);
+            Alert(StringFormat("TC_Slave: master ticket #%d skipped - would take total open risk to %.2f, cap is %.2f (%.2f%% of equity %.2f).",
+                  (int)mp.ticket, existingRisk + newRisk, maxAllowed, MaxTotalRiskPercent, equity));
+         }
          return;
       }
    }
@@ -417,6 +431,7 @@ void CheckEquityProtection()
    {
       g_halted = true;
       PrintFormat("TC_Slave: EQUITY PROTECTION TRIGGERED (equity=%.2f, peak=%.2f). New trade copying halted; restart the EA to resume.", eq, g_peakEquity);
+      Alert(StringFormat("TC_Slave: EQUITY PROTECTION TRIGGERED (equity=%.2f, peak=%.2f). New copying halted; restart the EA to resume.", eq, g_peakEquity));
 
       if(CloseAllOnEquityBreach)
          CloseAllManagedPositions();
@@ -475,6 +490,7 @@ void CheckDailyLossLimit()
    {
       g_dailyHalted = true;
       PrintFormat("TC_Slave: DAILY LOSS LIMIT TRIGGERED (today's loss=%.2f%%, limit=%.2f%%). Closing all managed positions; copying halted until the next broker day.", lossPct, DailyLossLimitPercent);
+      Alert(StringFormat("TC_Slave: DAILY LOSS LIMIT TRIGGERED (today's loss=%.2f%%, limit=%.2f%%). Closing everything; resumes next broker day.", lossPct, DailyLossLimitPercent));
       CloseAllManagedPositions();
    }
 }
@@ -532,6 +548,21 @@ double ComputeTotalOpenRisk()
 //+------------------------------------------------------------------+
 //| Map helpers                                                       |
 //+------------------------------------------------------------------+
+bool TicketInArray(const ulong &arr[], ulong ticket)
+{
+   for(int i = 0; i < ArraySize(arr); i++)
+      if(arr[i] == ticket)
+         return true;
+   return false;
+}
+
+void AddTicketToArray(ulong &arr[], ulong ticket)
+{
+   int idx = ArraySize(arr);
+   ArrayResize(arr, idx + 1);
+   arr[idx] = ticket;
+}
+
 int FindMapIndexByMasterTicket(ulong masterTicket)
 {
    for(int i = 0; i < ArraySize(g_map); i++)
