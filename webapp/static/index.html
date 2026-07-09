@@ -101,6 +101,41 @@
     font-size: 13px;
     margin-top: 16px;
   }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .section-head h2 { margin: 0; }
+  .hidden-toggle {
+    display: none;
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 6px;
+  }
+  .hidden-toggle:hover { text-decoration: underline; }
+  .hidden-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .card-actions { display: flex; align-items: center; gap: 6px; }
+  .icon-btn {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+  }
+  .icon-btn:hover { background: var(--border); color: var(--text); }
+  .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .card--hidden { opacity: 0.55; border-style: dashed; }
   code { background: var(--border); padding: 1px 5px; border-radius: 4px; }
 </style>
 </head>
@@ -113,18 +148,43 @@
   <div id="warning"></div>
 
   <section>
-    <h2>Master account(s)</h2>
+    <div class="section-head">
+      <h2>Master account(s)</h2>
+      <button class="hidden-toggle" id="toggleHiddenMasters" type="button"></button>
+    </div>
     <div class="grid" id="masters"></div>
   </section>
 
   <section>
-    <h2>Slave (destination) accounts</h2>
+    <div class="section-head">
+      <h2>Slave (destination) accounts</h2>
+      <button class="hidden-toggle" id="toggleHiddenSlaves" type="button"></button>
+    </div>
     <div class="grid" id="slaves"></div>
   </section>
 </main>
 
 <script>
 const FRESH_LIMIT_SECONDS = 5;
+const HIDDEN_MASTERS_KEY = 'tc-hidden-masters';
+const HIDDEN_SLAVES_KEY = 'tc-hidden-slaves';
+
+function loadHiddenSet(key) {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function saveHiddenSet(key, set) {
+  localStorage.setItem(key, JSON.stringify([...set]));
+}
+
+const hiddenMasters = loadHiddenSet(HIDDEN_MASTERS_KEY);
+const hiddenSlaves = loadHiddenSet(HIDDEN_SLAVES_KEY);
+let showHiddenMasters = false;
+let showHiddenSlaves = false;
 
 function fmtMoney(n) {
   return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -141,7 +201,7 @@ function fmtPl(n) {
   return `<span class="${cls}">${sign}${fmtMoney(n)}</span>`;
 }
 
-function masterCard(m) {
+function masterCard(m, isHidden) {
   const rows = m.positions.map(p => `
     <tr>
       <td>#${p.ticket}</td>
@@ -154,14 +214,21 @@ function masterCard(m) {
       <td>${fmtPl(p.profit)}</td>
     </tr>`).join('');
 
+  const action = isHidden ? 'unhide-master' : 'hide-master';
+  const glyph = isHidden ? '↺' : '×';
+  const label = isHidden ? `Restore master ${m.masterId}` : `Hide master ${m.masterId}`;
+
   return `
-  <div class="card">
+  <div class="card${isHidden ? ' card--hidden' : ''}">
     <div class="card-top">
       <div>
         <div class="card-title">Master ${m.masterId}</div>
         <div class="card-sub">login #${m.login}</div>
       </div>
-      <div class="card-sub">${freshDot(m.ageSeconds)}</div>
+      <div class="card-actions">
+        <div class="card-sub">${freshDot(m.ageSeconds)}</div>
+        <button class="icon-btn" type="button" data-action="${action}" data-id="${m.masterId}" title="${label}" aria-label="${label}">${glyph}</button>
+      </div>
     </div>
     <div class="stats">
       <div><div class="stat-label">Balance</div><div class="stat-value">${fmtMoney(m.balance)}</div></div>
@@ -178,7 +245,7 @@ function masterCard(m) {
   </div>`;
 }
 
-function slaveCard(s) {
+function slaveCard(s, isHidden) {
   const rows = s.mapped.map(p => `
     <tr>
       <td>#${p.masterTicket} → #${p.slaveTicket}</td>
@@ -195,15 +262,21 @@ function slaveCard(s) {
         ? `<span class="dot fresh"></span>linked (${s.masterLinkMs}ms)`
         : `<span class="dot stale"></span>master data ${(s.masterLinkMs/1000).toFixed(1)}s old`);
 
+  const slaveId = `${s.masterId}::${s.login}`;
+  const action = isHidden ? 'unhide-slave' : 'hide-slave';
+  const glyph = isHidden ? '↺' : '×';
+  const label = isHidden ? `Restore slave login ${s.login}` : `Hide slave login ${s.login}`;
+
   return `
-  <div class="card">
+  <div class="card${isHidden ? ' card--hidden' : ''}">
     <div class="card-top">
       <div>
         <div class="card-title">Slave — following ${s.masterId}</div>
         <div class="card-sub">login #${s.login}</div>
       </div>
-      <div>
+      <div class="card-actions">
         ${s.halted ? '<span class="badge halted">HALTED</span>' : '<span class="badge ok">ACTIVE</span>'}
+        <button class="icon-btn" type="button" data-action="${action}" data-id="${slaveId}" title="${label}" aria-label="${label}">${glyph}</button>
       </div>
     </div>
     <div class="card-sub">${freshDot(s.ageSeconds)} &middot; ${linkInfo}</div>
@@ -245,12 +318,58 @@ async function refresh() {
     warnEl.innerHTML = '';
   }
 
-  document.getElementById('masters').innerHTML =
-    data.masters.length ? data.masters.map(masterCard).join('') : '<div class="empty">No master accounts detected</div>';
+  const visibleMasters = data.masters.filter(m => showHiddenMasters || !hiddenMasters.has(m.masterId));
+  const hiddenMasterCount = data.masters.length - data.masters.filter(m => !hiddenMasters.has(m.masterId)).length;
 
-  document.getElementById('slaves').innerHTML =
-    data.slaves.length ? data.slaves.map(slaveCard).join('') : '<div class="empty">No slave accounts detected</div>';
+  document.getElementById('masters').innerHTML = visibleMasters.length
+    ? visibleMasters.map(m => masterCard(m, hiddenMasters.has(m.masterId))).join('')
+    : `<div class="empty">${hiddenMasterCount ? 'All master accounts are hidden' : 'No master accounts detected'}</div>`;
+
+  const toggleMasters = document.getElementById('toggleHiddenMasters');
+  toggleMasters.style.display = hiddenMasterCount ? 'inline-block' : 'none';
+  toggleMasters.textContent = showHiddenMasters ? 'Hide dismissed' : `Show ${hiddenMasterCount} hidden`;
+
+  const visibleSlaves = data.slaves.filter(s => showHiddenSlaves || !hiddenSlaves.has(`${s.masterId}::${s.login}`));
+  const hiddenSlaveCount = data.slaves.length - data.slaves.filter(s => !hiddenSlaves.has(`${s.masterId}::${s.login}`)).length;
+
+  document.getElementById('slaves').innerHTML = visibleSlaves.length
+    ? visibleSlaves.map(s => slaveCard(s, hiddenSlaves.has(`${s.masterId}::${s.login}`))).join('')
+    : `<div class="empty">${hiddenSlaveCount ? 'All slave accounts are hidden' : 'No slave accounts detected'}</div>`;
+
+  const toggleSlaves = document.getElementById('toggleHiddenSlaves');
+  toggleSlaves.style.display = hiddenSlaveCount ? 'inline-block' : 'none';
+  toggleSlaves.textContent = showHiddenSlaves ? 'Hide dismissed' : `Show ${hiddenSlaveCount} hidden`;
 }
+
+document.getElementById('masters').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  if (btn.dataset.action === 'hide-master') hiddenMasters.add(id);
+  else if (btn.dataset.action === 'unhide-master') hiddenMasters.delete(id);
+  saveHiddenSet(HIDDEN_MASTERS_KEY, hiddenMasters);
+  refresh();
+});
+
+document.getElementById('slaves').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  if (btn.dataset.action === 'hide-slave') hiddenSlaves.add(id);
+  else if (btn.dataset.action === 'unhide-slave') hiddenSlaves.delete(id);
+  saveHiddenSet(HIDDEN_SLAVES_KEY, hiddenSlaves);
+  refresh();
+});
+
+document.getElementById('toggleHiddenMasters').addEventListener('click', () => {
+  showHiddenMasters = !showHiddenMasters;
+  refresh();
+});
+
+document.getElementById('toggleHiddenSlaves').addEventListener('click', () => {
+  showHiddenSlaves = !showHiddenSlaves;
+  refresh();
+});
 
 refresh();
 setInterval(refresh, 2000);
