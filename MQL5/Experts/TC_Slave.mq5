@@ -281,7 +281,7 @@ void OpenNewSlavePosition(const SPositionRecord &mp, const STradeSnapshotHeader 
 
    if(MaxTotalRiskPercent > 0)
    {
-      double newRisk = ComputePositionRisk(slaveSymbol, effType, lots, price, effSl);
+      double newRisk = TC_ComputePositionRisk(slaveSymbol, effType, lots, price, effSl);
       if(newRisk < 0)
       {
          PrintFormat("TC_Slave: master ticket #%d would open with no stop-loss - skipping, since risk can't be measured under MaxTotalRiskPercent.", (int)mp.ticket);
@@ -496,24 +496,6 @@ void CheckDailyLossLimit()
 }
 
 //+------------------------------------------------------------------+
-//| Monetary risk (potential loss) if this position's SL is hit.      |
-//| Returns -1 if there's no SL, since risk can't be measured then.   |
-//+------------------------------------------------------------------+
-double ComputePositionRisk(const string symbol, int posType, double volume, double priceOpen, double sl)
-{
-   if(sl == 0)
-      return -1;
-
-   ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-
-   double profit = 0;
-   if(!OrderCalcProfit(orderType, symbol, volume, priceOpen, sl, profit))
-      return -1;
-
-   return MathAbs(profit);
-}
-
-//+------------------------------------------------------------------+
 //| Sum of risk across every currently open position tagged with     |
 //| SlaveMagic. A position with no SL contributes nothing to the sum |
 //| (its risk is unmeasurable) - a known limitation for any position |
@@ -532,7 +514,7 @@ double ComputeTotalOpenRisk()
       double sl = PositionGetDouble(POSITION_SL);
       if(sl == 0) continue;
 
-      double risk = ComputePositionRisk(
+      double risk = TC_ComputePositionRisk(
          PositionGetString(POSITION_SYMBOL),
          (int)PositionGetInteger(POSITION_TYPE),
          PositionGetDouble(POSITION_VOLUME),

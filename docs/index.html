@@ -547,7 +547,44 @@ python app.py</code></pre>
         <div class="param-item">
           <div class="param-head"><span class="param-name">MagicFilter</span><span class="param-default">default: 0 (all)</span></div>
           <p>Only publish positions tagged with this exact magic number. Leave at 0 to
-          publish everything open on this account, no matter what opened it.</p>
+          publish everything open on this account, no matter what opened it. Only affects
+          what gets <em>published to slaves</em> — the two settings below ignore this and
+          always look at the whole account.</p>
+        </div>
+      </div>
+
+      <div class="param-group">
+        <h4>Risk &amp; safety limits — protect this account from your own manual trading</h4>
+        <div class="callout danger" style="margin-bottom:14px;">
+          <strong>These two settings will close your manually-opened trades.</strong>
+          They're the one exception to "the master never places or modifies an order" —
+          if a limit is breached, this EA closes real positions on this account,
+          regardless of what opened them. MT5 gives an EA no way to block an order before
+          it fills, so what actually happens is the position exists very briefly (well
+          under a second, typically) before getting closed back out on the next check.
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">MaxTotalRiskPercent</span><span class="param-default">default: 0 (disabled)</span></div>
+          <p>Caps how much you could lose across <em>every open position on this account</em>
+          at once — not equity after the fact, but risk before it happens. Each cycle it
+          works out "if this position's stop-loss got hit right now, how much would that
+          lose" for every open position and adds those up.</p>
+          <p>Set this to <code>2</code> and if that running total ever goes over 2% of
+          equity, the newest position(s) responsible for pushing it over get closed —
+          oldest positions are left alone, up to the cap. A position with no stop-loss is
+          always closed immediately, since there'd be no way to know how much it could
+          lose.</p>
+        </div>
+        <div class="param-item">
+          <div class="param-head"><span class="param-name">DailyLossLimitPercent</span><span class="param-default">default: 0 (disabled)</span></div>
+          <p>"Don't lose more than X% today," enforced. Set it to <code>3</code> and if
+          equity ever falls 3% below wherever it was when this EA first saw today, it
+          closes <em>every</em> open position on the account.</p>
+          <p>Unlike the slave's version of this setting, it doesn't stop there: for the
+          rest of that broker day, it keeps closing anything it finds open, every time it
+          checks — since nothing would otherwise stop you from immediately reopening a
+          position after the first sweep. It resumes on its own the next broker day, using
+          that new day's equity as the fresh starting point.</p>
         </div>
       </div>
     </div>

@@ -224,6 +224,26 @@ bool TC_ReadSnapshot(const string masterId, STradeSnapshotHeader &header, SPosit
 }
 
 //+------------------------------------------------------------------+
+//| Monetary risk (potential loss) if this position's SL is hit.      |
+//| Returns -1 if there's no SL, since risk can't be measured then.   |
+//| Shared by TC_Master (whole-account risk cap) and TC_Slave (open-  |
+//| risk cap on its own mirrored positions).                          |
+//+------------------------------------------------------------------+
+double TC_ComputePositionRisk(const string symbol, int posType, double volume, double priceOpen, double sl)
+{
+   if(sl == 0)
+      return -1;
+
+   ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+
+   double profit = 0;
+   if(!OrderCalcProfit(orderType, symbol, volume, priceOpen, sl, profit))
+      return -1;
+
+   return MathAbs(profit);
+}
+
+//+------------------------------------------------------------------+
 //| Volume normalization to a symbol's step/min/max                  |
 //+------------------------------------------------------------------+
 double TC_NormalizeVolume(const string symbol, double volume)

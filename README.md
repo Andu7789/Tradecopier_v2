@@ -94,7 +94,28 @@ TC_COMMON_FOLDER="C:\Users\you\AppData\Roaming\MetaQuotes\Terminal\Common\Files"
 |---|---|
 | `MasterID` | Identifier slaves use to find this master. Blank = account login number. |
 | `UpdateIntervalMs` | How often to publish the snapshot. |
-| `MagicFilter` | Only publish positions with this magic number (0 = all). |
+| `MagicFilter` | Only publish positions with this magic number (0 = all). Only affects what gets *published* to slaves. |
+| `MaxTotalRiskPercent` | Closes the newest position(s) pushing total open risk over this % of equity (0 = disabled). |
+| `DailyLossLimitPercent` | Closes everything and blocks new positions for the rest of the day if today's loss reaches this % (0 = disabled). Auto-resumes the next broker day. |
+
+`MaxTotalRiskPercent` and `DailyLossLimitPercent` are **optional, self-protection
+features for the master account itself** — separate from the copier's job of
+publishing state. Unlike `MagicFilter`, they look at *every* open position on
+the account regardless of what opened it, because they exist specifically to
+protect the account from your own manual trading, not just what an EA does.
+
+> **This means the master EA will close your manually-opened trades** if you
+> enable either setting and breach it. `MaxTotalRiskPercent` sums up "what
+> would I lose if every position's stop-loss got hit" across the whole
+> account, and closes the newest position(s) pushing that total over the
+> limit — a position with no stop-loss is always closed immediately, since
+> its risk can't be measured. `DailyLossLimitPercent` is blunter: once
+> today's loss crosses the limit, it closes *everything* and then keeps
+> closing anything you open for the rest of the day (checked every
+> `UpdateIntervalMs`), resuming automatically the next broker day. Neither
+> setting can stop an order before it fills — MT5 gives an EA no way to veto
+> a manual click — so what actually happens is the position exists very
+> briefly (well under a second, typically) before the EA closes it back out.
 
 ## `TC_Slave` inputs
 

@@ -159,6 +159,39 @@ are excluded from the running total for the same reason — a known blind spot
 worth being aware of if you enable this after already having unprotected
 positions open.
 
+## Master-side risk protection
+
+`TC_Master` is otherwise read-only — it never places or modifies an order,
+only reports state. `MaxTotalRiskPercent` and `DailyLossLimitPercent` are the
+one exception: optional inputs that let the master account protect *itself*
+from your own manual trading, independent of the copier. Both look at
+**every open position on the account, regardless of magic number** — this is
+deliberate, since `MagicFilter` only controls what gets published to slaves,
+and these two settings exist specifically to catch manual trades that would
+never be tagged with any particular magic.
+
+Neither setting can prevent an order from filling — MT5 gives an EA no way
+to veto a manually-placed order before execution. What they actually do is
+close the offending position back out on the very next timer tick (as fast
+as `UpdateIntervalMs`), so the position exists only briefly rather than
+being blocked outright.
+
+- **`MaxTotalRiskPercent`** — each cycle, computes `TC_ComputePositionRisk()`
+  (the same shared helper `TC_Slave` uses) for every open position on the
+  account, sorts them oldest-first, and closes whichever position(s) push
+  the running total over the cap — oldest positions are kept up to the
+  limit, newest are shed first, on the basis that the newest trade is what
+  caused the breach. A position with no stop-loss is always closed
+  immediately, regardless of the running total, since its risk is
+  unmeasurable.
+- **`DailyLossLimitPercent`** — same day-anchor mechanic as the slave's
+  version, but blunter: once today's loss crosses the limit, it closes
+  *every* open position and then, unlike the slave (which just stops
+  copying), **keeps closing anything found open on the account every
+  subsequent cycle** for the rest of the broker day — since nothing stops a
+  human from immediately reopening a position after a one-time sweep.
+  Resumes automatically the next broker day.
+
 ## Explicitly out of scope
 
 - Pending orders (limit/stop) are not copied — positions only.
